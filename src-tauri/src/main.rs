@@ -266,7 +266,10 @@ async fn search_mcp_packages(query: String, filter: String, source: String) -> R
     use std::process::Command;
     use regex::Regex;
     
-    println!("Searching for '{}' with filter '{}' from source '{}'", query, filter, source);
+    // Only log non-empty searches to avoid spam
+    if !query.trim().is_empty() {
+        println!("Searching for '{}' with filter '{}' from source '{}'", query, filter, source);
+    }
     
     // Get list of installed servers first
     let installed_servers = get_installed_servers().await.unwrap_or_default();

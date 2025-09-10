@@ -4,7 +4,6 @@ use std::process::{Command, Stdio};
 use tokio::sync::RwLock;
 
 use crate::detection::McpServerConfig;
-use crate::configuration::ConfigurationEngine;
 use super::{ServerStatus, ProcessInfo, ServerOperationResult, ServerRegistry};
 
 /// Manages MCP server lifecycle operations
@@ -13,8 +12,6 @@ pub struct ServerManager {
     registry: ServerRegistry,
     /// Currently running servers
     running_servers: RwLock<HashMap<String, ProcessInfo>>,
-    /// Configuration engine for server configs
-    config_engine: Option<ConfigurationEngine>,
 }
 
 impl ServerManager {
@@ -23,16 +20,6 @@ impl ServerManager {
         Self {
             registry: ServerRegistry::new(),
             running_servers: RwLock::new(HashMap::new()),
-            config_engine: None,
-        }
-    }
-
-    /// Create a new server manager with configuration engine
-    pub fn with_config_engine(config_engine: ConfigurationEngine) -> Self {
-        Self {
-            registry: ServerRegistry::new(),
-            running_servers: RwLock::new(HashMap::new()),
-            config_engine: Some(config_engine),
         }
     }
 
@@ -59,7 +46,7 @@ impl ServerManager {
 
         // Start the process
         match self.spawn_server_process(command, &server_config.args, &server_config.env).await {
-            Ok(mut child) => {
+            Ok(child) => {
                 let pid = child.id();
                 
                 let process_info = ProcessInfo {
@@ -142,7 +129,7 @@ impl ServerManager {
         
         if let Some(process_info) = running.get(server_id) {
             // Check if process is still alive
-            if let Some(ref child) = process_info.child {
+            if let Some(ref _child) = process_info.child {
                 // For now, assume running if we have a process handle
                 // In a more complete implementation, we'd check if the process is actually alive
                 ServerStatus::Running

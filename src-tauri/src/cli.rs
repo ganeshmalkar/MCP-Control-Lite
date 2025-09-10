@@ -362,7 +362,7 @@ async fn remove_server(name: &str) -> Result<()> {
 async fn start_server(name: &str) -> Result<()> {
     println!("🚀 Starting server: {}", name);
     
-    let mut server_manager = ServerManager::new();
+    let server_manager = ServerManager::new();
     
     // Get the server config from installed servers
     if let Some(server_config) = server_manager.get_registry().get_installed_server(name) {
@@ -437,7 +437,6 @@ async fn server_status() -> Result<()> {
 async fn test_amazon_q() -> Result<()> {
     println!("🧪 Testing Amazon Q config reading...");
     
-    use std::path::PathBuf;
     use crate::filesystem::paths::PathUtils;
     
     let config_path = "~/.aws/amazonq/mcp.json";
@@ -1442,7 +1441,7 @@ async fn search_npm_registry(query: &str) -> Result<Vec<SearchResult>> {
                 let name = package.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
                 let description = package.get("description").and_then(|d| d.as_str()).unwrap_or("No description");
                 let empty_vec = vec![];
-                let keywords = package.get("keywords").and_then(|k| k.as_array()).unwrap_or(&empty_vec);
+                let _keywords = package.get("keywords").and_then(|k| k.as_array()).unwrap_or(&empty_vec);
                 
                 // Simple exclusion of obviously non-MCP packages
                 let is_excluded = 

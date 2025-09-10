@@ -241,7 +241,7 @@ async fn clear_logs() -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn get_server_config(server_id: String, application: String) -> Result<serde_json::Value, String> {
+async fn get_server_config(server_id: String, _application: String) -> Result<serde_json::Value, String> {
     // For now, return a sample configuration
     Ok(serde_json::json!({
         "name": server_id.split('-').next().unwrap_or(&server_id),
@@ -263,72 +263,26 @@ async fn get_server_config(server_id: String, application: String) -> Result<ser
 
 #[tauri::command]
 async fn search_mcp_packages(query: String, filter: String, source: String) -> Result<Vec<serde_json::Value>, String> {
-    use std::process::Command;
-    use regex::Regex;
-    
-    // Debug logging for GUI
-    println!("🔍 GUI Search: query='{}', filter='{}', source='{}'", query, filter, source);
-    
-    // Get list of installed servers first
-    let installed_servers = get_installed_servers().await.unwrap_or_default();
-    
     let mut all_results = Vec::new();
     
-    // Search NPM directly if source includes npm
-    if source == "npm" {
-        match search_npm_packages(&query, &filter).await {
-            Ok(mut npm_results) => {
-                all_results.append(&mut npm_results);
-            },
-            Err(e) => {
-                println!("NPM search failed: {}", e);
-            }
+    // Search NPM if requested
+    if source == "npm" || source == "all" {
+        if let Ok(mut npm_results) = search_npm_packages(&query, &filter).await {
+            all_results.append(&mut npm_results);
         }
     }
     
-    // Search GitHub directly if source is github
-    if source == "github" {
-        match search_github_repositories(&query).await {
-            Ok(mut github_results) => {
-                all_results.append(&mut github_results);
-            },
-            Err(e) => {
-                println!("GitHub search failed: {}", e);
-            }
+    // Search GitHub if requested
+    if source == "github" || source == "all" {
+        if let Ok(mut github_results) = search_github_repositories(&query).await {
+            all_results.append(&mut github_results);
         }
     }
     
-    // For PulseMCP, we'll use a simulated search since we don't have CLI access
-    if source == "pulsemcp" || (source == "npm" && all_results.len() < 5) {
-        // Add some popular PulseMCP packages as fallback
-        let pulsemcp_packages = vec![
-            ("weather-mcp", "Weather information MCP server", "weather"),
-            ("file-manager", "File management MCP server", "files"),
-            ("database-mcp", "Database operations MCP server", "database"),
-            ("api-client", "REST API client MCP server", "api"),
-            ("calculator", "Mathematical calculations MCP server", "math"),
-        ];
-        
-        for (name, desc, keyword) in pulsemcp_packages {
-            if query.trim().is_empty() || 
-               name.contains(&query.to_lowercase()) || 
-               desc.to_lowercase().contains(&query.to_lowercase()) ||
-               keyword.contains(&query.to_lowercase()) {
-                
-                all_results.push(serde_json::json!({
-                    "name": name,
-                    "description": desc,
-                    "version": "latest",
-                    "author": "Community",
-                    "keywords": vec!["pulsemcp", keyword],
-                    "repository": format!("https://www.pulsemcp.com/servers/{}", name),
-                    "downloads": Some(5000u64),
-                    "rating": Some(4.5f64),
-                    "installed": false,
-                    "source": "pulsemcp"
-                }));
-            }
-        }
+    // Add PulseMCP packages
+    if source == "pulsemcp" || source == "all" {
+        let pulsemcp_packages = get_pulsemcp_packages(&query).await;
+        all_results.extend(pulsemcp_packages);
     }
     
     // Apply filter sorting
@@ -341,73 +295,85 @@ async fn search_mcp_packages(query: String, filter: String, source: String) -> R
             });
         },
         "recent" => {
-            // For recent, we'll just reverse the order
             all_results.reverse();
         },
         _ => {} // "all" - keep original order
     }
     
+    // Remove duplicates by name
+    let mut seen_names = std::collections::HashSet::new();
+    all_results.retain(|item| {
+        if let Some(name) = item.get("name").and_then(|n| n.as_str()) {
+            seen_names.insert(name.to_string())
+        } else {
+            true
+        }
+    });
+    
     Ok(all_results)
 }
 
-async fn get_pulsemcp_description(package_name: &str) -> Result<String, String> {
+async fn get_pulsemcp_packages(query: &str) -> Vec<serde_json::Value> {
     use std::process::Command;
     
-    // Try multiple approaches to get better PulseMCP descriptions
+    let search_url = "https://api.pulsemcp.com/v0beta/servers".to_string();
     
-    // First try: Direct package info from PulseMCP website
-    let clean_name = package_name.trim_start_matches('@');
-    let parts: Vec<&str> = clean_name.split('/').collect();
+    let output = Command::new("curl")
+        .arg("-s")
+        .arg("-H")
+        .arg("Accept: application/json")
+        .arg(&search_url)
+        .output();
     
-    if parts.len() == 2 {
-        let author = parts[0];
-        let package = parts[1];
-        
-        // Try to scrape the PulseMCP page for description
-        let url = format!("https://www.pulsemcp.com/servers/{}-{}", author, package);
-        
-        let mut cmd = Command::new("curl");
-        cmd.arg("-s")
-           .arg("-L") // Follow redirects
-           .arg(&url);
-        
-        if let Ok(output) = cmd.output() {
-            if output.status.success() {
-                let html = String::from_utf8_lossy(&output.stdout);
+    match output {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            
+            if let Ok(api_response) = serde_json::from_str::<serde_json::Value>(&stdout) {
+                let mut packages = Vec::new();
                 
-                // Look for description in HTML meta tags or content
-                if let Some(desc_start) = html.find("description") {
-                    let desc_section = &html[desc_start..desc_start.min(html.len()).min(desc_start + 500)];
-                    
-                    // Try to extract description from various HTML patterns
-                    if let Some(content_start) = desc_section.find("content=\"") {
-                        let content_start = content_start + 9;
-                        if let Some(content_end) = desc_section[content_start..].find("\"") {
-                            let description = &desc_section[content_start..content_start + content_end];
-                            if description.len() > 20 && !description.contains("MCP server from PulseMCP registry") {
-                                return Ok(description.to_string());
+                if let Some(servers) = api_response.get("servers").and_then(|s| s.as_array()) {
+                    for server in servers.iter() {
+                        let name = server.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
+                        let description = server.get("short_description").and_then(|d| d.as_str()).unwrap_or("");
+                        let url = server.get("url").and_then(|u| u.as_str()).unwrap_or("");
+                        let source_url = server.get("source_code_url").and_then(|u| u.as_str()).unwrap_or("");
+                        let stars = server.get("github_stars").and_then(|s| s.as_u64()).unwrap_or(0);
+                        let package_name = server.get("package_name").and_then(|p| p.as_str()).unwrap_or("");
+                        let downloads = server.get("package_download_count").and_then(|d| d.as_u64()).unwrap_or(0);
+                        
+                        // Filter by query if provided
+                        if !query.trim().is_empty() {
+                            let query_lower = query.to_lowercase();
+                            if !name.to_lowercase().contains(&query_lower) && 
+                               !description.to_lowercase().contains(&query_lower) {
+                                continue;
                             }
                         }
+                        
+                        packages.push(serde_json::json!({
+                            "name": if package_name.is_empty() { name } else { package_name },
+                            "description": description,
+                            "version": "latest",
+                            "author": "PulseMCP Community",
+                            "keywords": vec!["pulsemcp", "mcp"],
+                            "repository": if source_url.is_empty() { url } else { source_url },
+                            "downloads": Some(if downloads > 0 { downloads } else { stars }),
+                            "rating": Some(4.0 + (stars % 10) as f64 / 10.0),
+                            "installed": false,
+                            "source": "pulsemcp"
+                        }));
                     }
                 }
+                
+                return packages;
             }
         }
+        _ => {}
     }
     
-    Err("No description found".to_string())
-}
-
-async fn get_installed_servers() -> Result<Vec<String>, String> {
-    let servers = get_servers().await?;
-    let mut installed = Vec::new();
-    
-    for server in servers {
-        if let Some(name) = server.get("name").and_then(|n| n.as_str()) {
-            installed.push(name.to_string());
-        }
-    }
-    
-    Ok(installed)
+    // Fallback to empty list if API fails
+    Vec::new()
 }
 
 async fn search_github_repositories(query: &str) -> Result<Vec<serde_json::Value>, String> {
@@ -416,7 +382,7 @@ async fn search_github_repositories(query: &str) -> Result<Vec<serde_json::Value
     let search_term = if query.trim().is_empty() {
         "mcp server".to_string()
     } else {
-        format!("mcp {}", query)
+        format!("{} mcp server", query)
     };
     
     // Use curl to search GitHub API
@@ -424,13 +390,14 @@ async fn search_github_repositories(query: &str) -> Result<Vec<serde_json::Value
     cmd.arg("-s")
        .arg("-H")
        .arg("Accept: application/vnd.github.v3+json")
-       .arg(&format!("https://api.github.com/search/repositories?q={}&sort=stars&order=desc&per_page=10", 
+       .arg(&format!("https://api.github.com/search/repositories?q={}&sort=stars&order=desc&per_page=15", 
                      urlencoding::encode(&search_term)));
     
     let output = cmd.output().map_err(|e| format!("Failed to execute GitHub search: {}", e))?;
     
     if !output.status.success() {
-        return Err("GitHub search failed".to_string());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("GitHub search failed: {}", stderr));
     }
     
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -440,7 +407,7 @@ async fn search_github_repositories(query: &str) -> Result<Vec<serde_json::Value
     let mut results = Vec::new();
     
     if let Some(items) = github_response.get("items").and_then(|i| i.as_array()) {
-        for repo in items.iter().take(10) {
+        for repo in items.iter().take(15) {
             let name = repo.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
             let full_name = repo.get("full_name").and_then(|n| n.as_str()).unwrap_or(name);
             let description = repo.get("description").and_then(|d| d.as_str()).unwrap_or("");
@@ -451,13 +418,12 @@ async fn search_github_repositories(query: &str) -> Result<Vec<serde_json::Value
             let html_url = repo.get("html_url").and_then(|u| u.as_str()).unwrap_or("");
             let stars = repo.get("stargazers_count").and_then(|s| s.as_u64()).unwrap_or(0);
             
-            // Extract keywords from topics and description
+            // Extract keywords from topics
             let mut keywords = vec!["github".to_string()];
             if let Some(topics) = repo.get("topics").and_then(|t| t.as_array()) {
                 keywords.extend(topics.iter()
                     .filter_map(|t| t.as_str())
-                    .filter(|s| !["server", "from", "registry", "protocol", "context", "model"].contains(s))
-                    .take(4)
+                    .take(5)
                     .map(|s| s.to_string()));
             }
             
@@ -468,7 +434,7 @@ async fn search_github_repositories(query: &str) -> Result<Vec<serde_json::Value
                 "author": owner,
                 "keywords": keywords,
                 "repository": html_url,
-                "downloads": stars, // Use stars as download metric
+                "downloads": stars,
                 "rating": Some(4.0 + (stars % 10) as f64 / 10.0),
                 "installed": false,
                 "source": "github"
@@ -488,31 +454,39 @@ async fn search_npm_packages(query: &str, _filter: &str) -> Result<Vec<serde_jso
         format!("mcp {}", query)
     };
     
-    // Use npm search command
-    let mut cmd = Command::new("npm");
-    cmd.arg("search")
-       .arg(&search_term)
-       .arg("--json");
-    
-    let output = cmd.output().map_err(|e| format!("Failed to execute npm search: {}", e))?;
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(&format!("source ~/.zshrc 2>/dev/null || source ~/.bashrc 2>/dev/null || true; npm search '{}' --json", search_term))
+        .output()
+        .map_err(|e| format!("Failed to execute npm search: {}", e))?;
     
     if !output.status.success() {
-        return Err("NPM search failed".to_string());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("NPM search failed: {}", stderr));
     }
     
     let stdout = String::from_utf8_lossy(&output.stdout);
+    
+    if stdout.trim().is_empty() {
+        return Ok(vec![]);
+    }
+    
     let npm_results: Vec<serde_json::Value> = serde_json::from_str(&stdout)
         .map_err(|e| format!("Failed to parse NPM results: {}", e))?;
     
     let mut results = Vec::new();
     
-    for package in npm_results.iter().take(10) { // Limit to 10 results
+    for package in npm_results.iter().take(20) {
         let name = package.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
         let description = package.get("description").and_then(|d| d.as_str()).unwrap_or("");
         let version = package.get("version").and_then(|v| v.as_str()).unwrap_or("unknown");
-        let author = package.get("author")
-            .and_then(|a| a.get("name"))
-            .and_then(|n| n.as_str())
+        
+        let author = package.get("publisher")
+            .and_then(|p| p.get("username"))
+            .and_then(|u| u.as_str())
+            .or_else(|| package.get("author")
+                .and_then(|a| a.get("name"))
+                .and_then(|n| n.as_str()))
             .or_else(|| package.get("author").and_then(|a| a.as_str()))
             .unwrap_or("unknown");
         
@@ -522,8 +496,7 @@ async fn search_npm_packages(query: &str, _filter: &str) -> Result<Vec<serde_jso
                 let mut kw = vec!["npm".to_string()];
                 kw.extend(arr.iter()
                     .filter_map(|v| v.as_str())
-                    .filter(|s| !["server", "from", "registry", "protocol", "context", "model"].contains(s))
-                    .take(4)
+                    .take(5)
                     .map(|s| s.to_string()));
                 kw
             })
@@ -531,16 +504,10 @@ async fn search_npm_packages(query: &str, _filter: &str) -> Result<Vec<serde_jso
         
         let repository = package.get("links")
             .and_then(|l| l.get("repository"))
-            .and_then(|r| r.as_str())
-            .or_else(|| package.get("repository")
-                .and_then(|r| r.get("url"))
-                .and_then(|u| u.as_str()));
+            .and_then(|r| r.as_str());
         
-        let downloads = package.get("searchScore").and_then(|s| s.as_f64()).map(|s| (s * 10000.0) as u64);
+        let downloads = Some(1000u64);
         let rating = Some(4.0 + (name.len() % 10) as f64 / 10.0);
-        
-        // Check if installed (this would need to be passed in or retrieved)
-        let is_installed = false; // TODO: Check against installed servers list
         
         results.push(serde_json::json!({
             "name": name,
@@ -551,7 +518,7 @@ async fn search_npm_packages(query: &str, _filter: &str) -> Result<Vec<serde_jso
             "repository": repository,
             "downloads": downloads,
             "rating": rating,
-            "installed": is_installed,
+            "installed": false,
             "source": "npm"
         }));
     }
@@ -637,6 +604,9 @@ async fn main() {
         }
     } else {
         tauri::Builder::default()
+            .plugin(tauri_plugin_http::init())
+            .plugin(tauri_plugin_fs::init())
+            .plugin(tauri_plugin_shell::init())
             .setup(|app| {
                 // Create enhanced system tray menu
                 let show = MenuItem::with_id(app, "show", "Show MCP Control", true, None::<&str>)?;

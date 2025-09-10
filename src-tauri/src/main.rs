@@ -51,9 +51,22 @@ async fn get_applications() -> Result<Vec<serde_json::Value>, String> {
     let mut detector = ApplicationDetector::new().map_err(|e| e.to_string())?;
     let results = detector.detect_all_applications().await.map_err(|e| e.to_string())?;
     
+    // Get current settings to check enabled apps
+    let settings = get_settings().await.unwrap_or_else(|_| serde_json::json!({}));
+    let enabled_apps = settings.get("enabledApps").and_then(|e| e.as_object());
+    
     let mut applications = Vec::new();
     
     for result in &results {
+        // Check if this app is enabled in settings
+        if let Some(enabled_apps) = enabled_apps {
+            if let Some(enabled) = enabled_apps.get(&result.profile.name).and_then(|e| e.as_bool()) {
+                if !enabled {
+                    continue; // Skip disabled applications
+                }
+            }
+        }
+        
         let mut server_count = 0;
         
         if result.detected {
@@ -242,23 +255,74 @@ async fn clear_logs() -> Result<(), String> {
 
 #[tauri::command]
 async fn get_server_config(server_id: String, _application: String) -> Result<serde_json::Value, String> {
-    // For now, return a sample configuration
-    Ok(serde_json::json!({
-        "name": server_id.split('-').next().unwrap_or(&server_id),
-        "description": "MCP Server Configuration",
-        "enabled": true,
-        "command": "node",
-        "args": ["server.js"],
-        "env": {},
-        "port": 3000,
-        "host": "localhost",
-        "protocol": "http",
-        "tlsEnabled": false,
-        "authEnabled": false,
-        "dependencies": [],
-        "startupOrder": 0,
-        "restartOnFailure": true
-    }))
+    let mut detector = ApplicationDetector::new().map_err(|e| e.to_string())?;
+    let results = detector.detect_all_applications().await.map_err(|e| e.to_string())?;
+    
+    // Get current settings to check enabled apps
+    let settings = get_settings().await.unwrap_or_else(|_| serde_json::json!({}));
+    let enabled_apps = settings.get("enabledApps").and_then(|e| e.as_object());
+    
+    // Clean up server_id - remove any suffix after dash
+    let clean_server_id = server_id.split('-').next().unwrap_or(&server_id);
+    
+    // Find the server config in any detected application
+    for result in &results {
+        if result.detected {
+            if let Some(config_path) = &result.found_paths.config_file {
+                if let Ok(content) = tokio::fs::read_to_string(config_path).await {
+                    if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(mcp_servers) = config.get("mcpServers").and_then(|s| s.as_object()) {
+                            // Try exact match first, then clean match
+                            let server_config = mcp_servers.get(&server_id)
+                                .or_else(|| mcp_servers.get(clean_server_id));
+                            
+                            if let Some(server_config) = server_config {
+                                // Found the server config, extract real data
+                                let command = server_config.get("command").and_then(|c| c.as_str()).unwrap_or("");
+                                let args = server_config.get("args").and_then(|a| a.as_array()).cloned().unwrap_or_default();
+                                let env = server_config.get("env").and_then(|e| e.as_object()).cloned().unwrap_or_default();
+                                let disabled = server_config.get("disabled").and_then(|d| d.as_bool()).unwrap_or(false);
+                                
+                                // Get available applications (only enabled ones)
+                                let mut available_apps = Vec::new();
+                                for app_result in &results {
+                                    if let Some(enabled_apps) = enabled_apps {
+                                        if let Some(enabled) = enabled_apps.get(&app_result.profile.name).and_then(|e| e.as_bool()) {
+                                            if enabled {
+                                                available_apps.push(serde_json::json!({
+                                                    "name": app_result.profile.name,
+                                                    "detected": app_result.detected
+                                                }));
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                return Ok(serde_json::json!({
+                                    "name": clean_server_id,
+                                    "description": format!("MCP Server: {}", clean_server_id),
+                                    "enabled": !disabled,
+                                    "command": command,
+                                    "args": args,
+                                    "env": env,
+                                    "environmentVariables": env, // Also provide as environmentVariables for frontend compatibility
+                                    "currentApplication": result.profile.name,
+                                    "availableApplications": available_apps,
+                                    // Optional fields - only include if they make sense
+                                    "allowedTools": server_config.get("allowedTools").cloned().unwrap_or_else(|| serde_json::Value::Array(vec![])),
+                                    "timeout": server_config.get("timeout").and_then(|t| t.as_u64()),
+                                    "restartOnFailure": server_config.get("restartOnFailure").and_then(|r| r.as_bool()).unwrap_or(true)
+                                }));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // If server not found, return error
+    Err(format!("Server '{}' (or '{}') not found in any application configuration", server_id, clean_server_id))
 }
 
 #[tauri::command]

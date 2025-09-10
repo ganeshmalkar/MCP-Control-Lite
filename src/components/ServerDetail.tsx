@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Save, RotateCcw, X, Settings, Shield, Link, Monitor } from 'lucide-react';
+import { Save, RotateCcw, X, Settings, Shield, Link, Monitor, Code } from 'lucide-react';
 
 interface ServerConfig {
   name: string;
@@ -49,12 +49,19 @@ export default function ServerDetail({ serverId, serverName, application, onClos
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'basic' | 'advanced' | 'dependencies' | 'applications'>('basic');
+  const [activeTab, setActiveTab] = useState<'basic' | 'advanced' | 'dependencies' | 'applications' | 'editor'>('basic');
   const [message, setMessage] = useState<string | null>(null);
+  const [jsonEditor, setJsonEditor] = useState<string>('');
 
   useEffect(() => {
     loadServerConfig();
   }, [serverId]);
+
+  useEffect(() => {
+    if (activeTab === 'editor') {
+      updateJsonEditor();
+    }
+  }, [activeTab, config]);
 
   const loadServerConfig = async () => {
     try {
@@ -62,7 +69,11 @@ export default function ServerDetail({ serverId, serverName, application, onClos
         serverId, 
         application 
       });
-      setConfig(serverConfig);
+      // Ensure env is always an object
+      setConfig({
+        ...serverConfig,
+        env: serverConfig.env || {}
+      });
     } catch (error) {
       console.error('Failed to load server config:', error);
       setMessage('Failed to load server configuration');
@@ -113,6 +124,46 @@ export default function ServerDetail({ serverId, serverName, application, onClos
 
   const removeArg = (index: number) => {
     setConfig({ ...config, args: config.args.filter((_, i) => i !== index) });
+  };
+
+  const addEnv = () => {
+    const newKey = `ENV_VAR_${Object.keys(config.env).length + 1}`;
+    setConfig({ ...config, env: { ...config.env, [newKey]: '' } });
+  };
+
+  const updateEnvKey = (oldKey: string, newKey: string) => {
+    if (oldKey === newKey) return;
+    const newEnv = { ...config.env };
+    const value = newEnv[oldKey];
+    delete newEnv[oldKey];
+    newEnv[newKey] = value;
+    setConfig({ ...config, env: newEnv });
+  };
+
+  const updateEnvValue = (key: string, value: string) => {
+    setConfig({ ...config, env: { ...config.env, [key]: value } });
+  };
+
+  const removeEnv = (key: string) => {
+    const newEnv = { ...config.env };
+    delete newEnv[key];
+    setConfig({ ...config, env: newEnv });
+  };
+
+  const updateJsonEditor = () => {
+    setJsonEditor(JSON.stringify(config, null, 2));
+  };
+
+  const applyJsonEditor = () => {
+    try {
+      const parsedConfig = JSON.parse(jsonEditor);
+      setConfig({ ...config, ...parsedConfig, env: parsedConfig.env || {} });
+      setMessage('JSON configuration applied successfully!');
+      setTimeout(() => setMessage(null), 3000);
+    } catch (error) {
+      setMessage('Invalid JSON format. Please check your syntax.');
+      setTimeout(() => setMessage(null), 3000);
+    }
   };
 
   if (loading) {
@@ -212,7 +263,8 @@ export default function ServerDetail({ serverId, serverName, application, onClos
             { id: 'basic', label: 'Basic', icon: Settings },
             { id: 'advanced', label: 'Advanced', icon: Shield },
             { id: 'dependencies', label: 'Dependencies', icon: Link },
-            { id: 'applications', label: 'Applications', icon: Monitor }
+            { id: 'applications', label: 'Applications', icon: Monitor },
+            { id: 'editor', label: 'Code Editor', icon: Code }
           ].map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -237,6 +289,19 @@ export default function ServerDetail({ serverId, serverName, application, onClos
 
         {/* Content */}
         <div style={{ flex: 1, padding: '20px', overflow: 'auto' }}>
+          {/* Clarification Banner */}
+          <div style={{
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '6px',
+            padding: '12px 16px',
+            marginBottom: '20px',
+            color: 'var(--text-secondary)',
+            fontSize: '14px'
+          }}>
+            <strong style={{ color: 'var(--text-primary)' }}>Note:</strong> This editor modifies MCP Control Lite's internal settings for this server, not the original MCP configuration files. Changes here affect how this application manages and displays the server.
+          </div>
+
           {activeTab === 'basic' && (
             <div style={{ display: 'grid', gap: '16px' }}>
               <div>
@@ -337,6 +402,64 @@ export default function ServerDetail({ serverId, serverName, application, onClos
                   style={{ marginTop: '8px' }}
                 >
                   Add Argument
+                </button>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-primary)' }}>
+                  Environment Variables
+                </label>
+                {Object.entries(config.env).map(([key, value], index) => (
+                  <div key={index} style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                    <input
+                      type="text"
+                      placeholder="Key"
+                      value={key}
+                      onChange={(e) => updateEnvKey(key, e.target.value)}
+                      style={{
+                        flex: 1,
+                        padding: '8px',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '4px',
+                        background: 'var(--bg-primary)',
+                        color: 'var(--text-primary)'
+                      }}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Value"
+                      value={value}
+                      onChange={(e) => updateEnvValue(key, e.target.value)}
+                      style={{
+                        flex: 2,
+                        padding: '8px',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '4px',
+                        background: 'var(--bg-primary)',
+                        color: 'var(--text-primary)'
+                      }}
+                    />
+                    <button
+                      onClick={() => removeEnv(key)}
+                      style={{
+                        padding: '8px',
+                        background: '#e74c3c',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  onClick={addEnv}
+                  className="btn btn-secondary"
+                  style={{ marginTop: '8px' }}
+                >
+                  Add Environment Variable
                 </button>
               </div>
             </div>
@@ -533,6 +656,53 @@ export default function ServerDetail({ serverId, serverName, application, onClos
                   />
                   Restart on failure
                 </label>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'editor' && (
+            <div style={{ display: 'grid', gap: '16px' }}>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <h4 style={{ color: 'var(--text-primary)', margin: 0 }}>JSON Configuration Editor</h4>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      onClick={updateJsonEditor}
+                      className="btn btn-secondary"
+                      style={{ fontSize: '12px', padding: '6px 12px' }}
+                    >
+                      Refresh from GUI
+                    </button>
+                    <button
+                      onClick={applyJsonEditor}
+                      className="btn btn-primary"
+                      style={{ fontSize: '12px', padding: '6px 12px' }}
+                    >
+                      Apply to GUI
+                    </button>
+                  </div>
+                </div>
+                <textarea
+                  value={jsonEditor}
+                  onChange={(e) => setJsonEditor(e.target.value)}
+                  style={{
+                    width: '100%',
+                    height: '400px',
+                    padding: '12px',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '4px',
+                    background: 'var(--bg-primary)',
+                    color: 'var(--text-primary)',
+                    fontFamily: 'Monaco, Consolas, "Courier New", monospace',
+                    fontSize: '12px',
+                    lineHeight: '1.4',
+                    resize: 'vertical'
+                  }}
+                  placeholder="JSON configuration will appear here..."
+                />
+                <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '8px 0 0 0' }}>
+                  Edit the JSON configuration directly. Click "Apply to GUI" to update the form fields, or "Refresh from GUI" to sync from the current form values.
+                </p>
               </div>
             </div>
           )}

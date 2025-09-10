@@ -1,0 +1,169 @@
+# Task ID: 4
+# Title: Develop Core Configuration Engine
+# Status: done
+# Dependencies: 1, 2, 3
+# Priority: high
+# Description: Build the central configuration management engine that serves as the single source of truth for all MCP server configurations.
+# Details:
+Implement a ConfigurationEngine class that manages the lifecycle of MCP configurations:
+
+```typescript
+class ConfigurationEngine {
+  private serverConfigs: Map<string, MCPServerConfig> = new Map();
+  private applicationProfiles: Map<string, ApplicationProfile> = new Map();
+  private fileSystem: FileSystemService;
+  private detector: ApplicationDetector;
+  
+  constructor(fileSystem: FileSystemService, detector: ApplicationDetector) {
+    this.fileSystem = fileSystem;
+    this.detector = detector;
+  }
+  
+  // Initialize the engine
+  async initialize(): Promise<void> {
+    // Detect applications
+    const apps = await this.detector.detectApplications();
+    apps.forEach(app => this.applicationProfiles.set(app.id, app));
+    
+    // Import existing configurations
+    await this.importExistingConfigurations();
+  }
+  
+  
+  // Import configurations from detected applications
+  async importExistingConfigurations(): Promise<void> {
+    for (const app of this.applicationProfiles.values()) {
+      try {
+        const config = await this.fileSystem.readConfig(app.configPath);
+        // Extract MCP server configurations using appropriate adapter
+        const adapter = this.getAdapterForApplication(app);
+        const serverConfigs = adapter.extractServerConfigs(config);
+        
+        // Add to our registry
+        serverConfigs.forEach(serverConfig => {
+          this.serverConfigs.set(serverConfig.id, serverConfig);
+        });
+        
+        // Update last sync time
+        app.lastSync = new Date();
+      } catch (error) {
+        console.error(`Failed to import configuration from ${app.name}:`, error);
+      }
+    }
+  }
+  
+  // Get adapter for specific application
+  private getAdapterForApplication(app: ApplicationProfile): any {
+    // Return appropriate adapter based on app.adapter property
+    // This would be a factory pattern implementation
+  }
+  
+  // Get all server configurations
+  getServerConfigurations(): MCPServerConfig[] {
+    return Array.from(this.serverConfigs.values());
+  }
+  
+  // Get configuration for specific server
+  getServerConfiguration(id: string): MCPServerConfig | undefined {
+    return this.serverConfigs.get(id);
+  }
+  
+  // Update server configuration
+  async updateServerConfiguration(config: MCPServerConfig): Promise<void> {
+    // Validate configuration
+    this.validateServerConfiguration(config);
+    
+    // Update in our registry
+    this.serverConfigs.set(config.id, {
+      ...config,
+      metadata: {
+        ...config.metadata,
+        lastModified: new Date()
+      }
+    });
+    
+    // Sync to applications
+    await this.syncToApplications([config]);
+  }
+  
+  // Validate server configuration
+  private validateServerConfiguration(config: MCPServerConfig): void {
+    // Implement validation logic
+    // Throw error if invalid
+  }
+  
+  // Sync configurations to applications
+  async syncToApplications(configs: MCPServerConfig[]): Promise<void> {
+    for (const app of this.applicationProfiles.values()) {
+      try {
+        // Read current config
+        const currentConfig = await this.fileSystem.readConfig(app.configPath);
+        
+        // Get adapter
+        const adapter = this.getAdapterForApplication(app);
+        
+        // Apply changes
+        const updatedConfig = adapter.applyServerConfigs(currentConfig, configs);
+        
+        // Write back
+        await this.fileSystem.writeConfig(app.configPath, updatedConfig);
+        
+        // Update last sync time
+        app.lastSync = new Date();
+      } catch (error) {
+        console.error(`Failed to sync configuration to ${app.name}:`, error);
+      }
+    }
+  }
+}
+```
+
+Implement adapter pattern for different application types to handle the specific configuration formats and structures. Each adapter should be able to extract MCP configurations from application-specific formats and apply changes back.
+
+# Test Strategy:
+1. Unit tests for each method in the ConfigurationEngine
+2. Mock adapters for testing different application types
+3. Test configuration validation logic
+4. Test synchronization between applications
+5. Test error handling during import/export
+6. Integration tests with sample application configurations
+7. Test concurrent modification scenarios
+8. Performance tests with large configuration sets
+
+# Subtasks:
+## 1. Implement Configuration Engine Core Service [done]
+### Dependencies: None
+### Description: Create the main ConfigurationEngine class with initialization, import, and basic CRUD operations for server configurations.
+### Details:
+Complete the implementation of the ConfigurationEngine class with proper error handling and logging. Ensure the initialize() method properly sets up the engine by detecting applications and importing existing configurations. Implement getServerConfigurations(), getServerConfiguration(), and basic validation logic. Use TypeScript interfaces for type safety and implement proper error handling with custom error classes.
+
+## 2. Develop Configuration Adapter Pattern [done]
+### Dependencies: 4.1
+### Description: Implement the adapter pattern for different application types to handle specific configuration formats and structures.
+### Details:
+Create a ConfigurationAdapter interface and implement concrete adapter classes for each supported application type (e.g., NodeAdapter, PythonAdapter, JavaAdapter). Each adapter should implement methods to extract MCP configurations from application-specific formats and apply changes back. Use a factory pattern in the getAdapterForApplication() method to return the appropriate adapter based on the application profile.
+
+## 3. Implement Bi-directional Synchronization System [done]
+### Dependencies: 4.1, 4.2
+### Description: Build the synchronization system that keeps configurations in sync between the engine and applications.
+### Details:
+Complete the implementation of updateServerConfiguration() and syncToApplications() methods. Ensure changes to configurations are properly validated before being applied. Implement conflict detection and resolution strategies when configurations have been modified externally. Add transaction support to ensure atomic updates across multiple applications.
+
+## 4. Create Persistent Configuration Store [done]
+### Dependencies: 4.1
+### Description: Implement a persistent storage mechanism for the configuration engine to maintain state between application restarts.
+### Details:
+Add methods to serialize and deserialize the engine state (serverConfigs and applicationProfiles) to/from persistent storage. Implement saveState() and loadState() methods that use the FileSystemService to store and retrieve the engine state. Add automatic state saving on configuration changes and periodic backups of the state file.
+
+## 5. Integrate with Application Detection System [done]
+### Dependencies: 4.1, 4.4
+### Description: Connect the configuration engine with the application detection system to automatically discover and configure applications.
+### Details:
+Enhance the initialize() method to work with the ApplicationDetector. Implement event listeners for application detection events to automatically import configurations from newly detected applications. Add methods to handle application removal and configuration cleanup. Implement periodic scanning for new applications.
+
+## 6. Implement Validation and Testing Framework [done]
+### Dependencies: 4.1, 4.2, 4.3, 4.4, 4.5
+### Description: Create a comprehensive validation and testing framework for the configuration engine.
+### Details:
+Implement detailed validation logic in validateServerConfiguration() method with specific error messages for different validation failures. Add schema validation for configuration objects. Create a test harness that can simulate various configuration scenarios and edge cases. Implement performance benchmarks for configuration operations. Add logging throughout the engine for debugging and auditing purposes.
+

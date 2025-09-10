@@ -1,0 +1,152 @@
+# Task ID: 5
+# Title: Create Application Adapters
+# Status: done
+# Dependencies: 1, 4
+# Priority: high
+# Description: Implement specific adapters for each supported MCP-enabled application to handle their unique configuration formats and structures.
+# Details:
+Create an adapter interface and implement specific adapters for each supported application:
+
+```typescript
+interface ApplicationAdapter {
+  // Extract MCP server configurations from application config
+  extractServerConfigs(config: any): MCPServerConfig[];
+  
+  // Apply MCP server configurations to application config
+  applyServerConfigs(config: any, serverConfigs: MCPServerConfig[]): any;
+  
+  // Validate application-specific configuration
+  validateConfig(config: any): boolean;
+}
+
+// Claude Desktop Adapter
+class ClaudeDesktopAdapter implements ApplicationAdapter {
+  extractServerConfigs(config: any): MCPServerConfig[] {
+    // Claude Desktop stores MCP configs in config.mcp.servers
+    const servers = config?.mcp?.servers || [];
+    return servers.map(server => ({
+      id: server.id,
+      name: server.name,
+      type: server.type,
+      enabled: server.enabled,
+      parameters: server.parameters,
+      metadata: {
+        version: server.version || '1.0.0',
+        lastModified: new Date(server.lastModified || Date.now()),
+        createdAt: new Date(server.createdAt || Date.now())
+      }
+    }));
+  }
+  
+  applyServerConfigs(config: any, serverConfigs: MCPServerConfig[]): any {
+    // Ensure mcp structure exists
+    if (!config.mcp) config.mcp = {};
+    if (!config.mcp.servers) config.mcp.servers = [];
+    
+    // Update or add each server config
+    for (const serverConfig of serverConfigs) {
+      const index = config.mcp.servers.findIndex(s => s.id === serverConfig.id);
+      
+      const formattedServer = {
+        id: serverConfig.id,
+        name: serverConfig.name,
+        type: serverConfig.type,
+        enabled: serverConfig.enabled,
+        parameters: serverConfig.parameters,
+        version: serverConfig.metadata.version,
+        lastModified: serverConfig.metadata.lastModified.toISOString(),
+        createdAt: serverConfig.metadata.createdAt.toISOString()
+      };
+      
+      if (index >= 0) {
+        config.mcp.servers[index] = formattedServer;
+      } else {
+        config.mcp.servers.push(formattedServer);
+      }
+    }
+    
+    return config;
+  }
+  
+  validateConfig(config: any): boolean {
+    // Implement validation logic for Claude Desktop
+    return true; // Simplified for now
+  }
+}
+
+// Cursor Adapter
+class CursorAdapter implements ApplicationAdapter {
+  // Similar implementation for Cursor
+  // ...
+}
+
+// Factory for creating adapters
+class AdapterFactory {
+  static createAdapter(type: string): ApplicationAdapter {
+    switch (type) {
+      case 'claude-desktop':
+        return new ClaudeDesktopAdapter();
+      case 'cursor':
+        return new CursorAdapter();
+      // Add more adapters as needed
+      default:
+        throw new Error(`Unsupported adapter type: ${type}`);
+    }
+  }
+}
+```
+
+Implement specific adapters for each supported application (Claude Desktop, Cursor, VS Code with MCP extensions). Each adapter should handle the unique configuration format and structure of its application, including:
+
+1. Extracting MCP server configurations from application-specific formats
+2. Applying changes to MCP server configurations back to application-specific formats
+3. Validating configurations for application-specific requirements
+4. Handling any special cases or quirks of the application
+
+# Test Strategy:
+1. Unit tests for each adapter implementation
+2. Tests with sample configurations from each application
+3. Tests for extracting configurations
+4. Tests for applying configuration changes
+5. Tests for validation logic
+6. Tests for handling invalid or malformed configurations
+7. Integration tests with the ConfigurationEngine
+8. Tests for adapter factory
+
+# Subtasks:
+## 1. Create Basic CLI Testing Commands [done]
+### Dependencies: None
+### Description: Implement minimal CLI commands to test backend functionality as we develop adapters
+### Details:
+Create a lightweight CLI interface with basic commands to test the configuration engine and application detection:
+- `detect-apps` - List detected MCP applications
+- `list-servers` - Show configured MCP servers  
+- `sync-config` - Test configuration synchronization
+- `validate-config` - Validate application configurations
+This allows testing backend functionality before full CLI (Task 8) and GUI (Task 7) implementation.
+<info added on 2025-09-09T16:20:15.663Z>
+The CLI now detects Amazon Q Developer as a supported MCP application with 80% confidence level. The `detect-apps` command will display Amazon Q Developer in the list of 6 MCP-enabled applications. Amazon Q Developer adapter supports global MCP configuration management for synchronizing settings across environments.
+</info added on 2025-09-09T16:20:15.663Z>
+
+## 2. Define Application Adapter Interface [done]
+### Dependencies: None
+### Description: Create the formal ApplicationAdapter trait and supporting types for consistent adapter implementation
+### Details:
+Define the ApplicationAdapter trait in Rust with methods for:
+- extract_server_configs: Extract MCP server configurations from application config
+- apply_server_configs: Apply MCP server configurations to application config  
+- validate_config: Validate application-specific configuration
+- get_supported_formats: Return supported configuration formats
+Include supporting types and error handling for robust adapter implementation.
+
+## 3. Integrate Adapters with Configuration Engine [done]
+### Dependencies: None
+### Description: Integrate the application adapters with the configuration engine to enable end-to-end configuration management
+### Details:
+Integrate the ApplicationAdapter system with the ConfigurationEngine to:
+- Use adapters for extracting configurations from detected applications
+- Use adapters for applying configurations to applications during sync
+- Replace the existing sync methods with adapter-based implementations
+- Add adapter selection logic based on application profiles
+- Test the integration with the CLI commands to ensure end-to-end functionality
+

@@ -1,0 +1,252 @@
+# Task ID: 8
+# Title: Implement CLI Interface
+# Status: in-progress
+# Dependencies: 1, 4, 5, 6
+# Priority: medium
+# Description: Create a command-line interface for MCP Control Lite to enable automation and scripting of MCP server management.
+# Details:
+Implement a CLI tool using a framework like Commander.js or Yargs:
+
+```typescript
+// cli.ts
+import { Command } from 'commander';
+import { ConfigurationEngine } from './core/ConfigurationEngine';
+import { ServerManager } from './core/ServerManager';
+import { FileSystemService } from './core/FileSystemService';
+import { ApplicationDetector } from './core/ApplicationDetector';
+
+// Setup dependencies
+const fileSystem = new FileSystemService();
+const detector = new ApplicationDetector();
+const configEngine = new ConfigurationEngine(fileSystem, detector);
+const serverManager = new ServerManager(configEngine);
+
+// Initialize the program
+async function initialize() {
+  await configEngine.initialize();
+  await serverManager.discoverServers();
+}
+
+const program = new Command();
+
+program
+  .name('mcp-control')
+  .description('MCP Control Lite CLI - Manage MCP servers across applications')
+  .version('1.0.0');
+
+// List servers command
+program
+  .command('list')
+  .description('List all MCP servers')
+  .option('-a, --all', 'Show all servers, including disabled ones')
+  .option('-j, --json', 'Output in JSON format')
+  .action(async (options) => {
+    await initialize();
+    
+    const servers = configEngine.getServerConfigurations();
+    const statuses = serverManager.getAllServerStatuses();
+    
+    const filteredServers = options.all 
+      ? servers 
+      : servers.filter(server => server.enabled);
+    
+    if (options.json) {
+      console.log(JSON.stringify(filteredServers, null, 2));
+      return;
+    }
+    
+    console.log('MCP Servers:');
+    filteredServers.forEach(server => {
+      console.log(`- ${server.name} (${server.id})`);
+      console.log(`  Type: ${server.type}`);
+      console.log(`  Status: ${statuses[server.id] || 'unknown'}`);
+      console.log(`  Enabled: ${server.enabled ? 'Yes' : 'No'}`);
+      console.log('');
+    });
+  });
+
+// Enable server command
+program
+  .command('enable <serverId>')
+  .description('Enable an MCP server')
+  .action(async (serverId) => {
+    await initialize();
+    
+    const server = configEngine.getServerConfiguration(serverId);
+    if (!server) {
+      console.error(`Server not found: ${serverId}`);
+      process.exit(1);
+    }
+    
+    await configEngine.updateServerConfiguration({
+      ...server,
+      enabled: true
+    });
+    
+    console.log(`Server ${server.name} (${serverId}) enabled`);
+  });
+
+// Disable server command
+program
+  .command('disable <serverId>')
+  .description('Disable an MCP server')
+  .action(async (serverId) => {
+    await initialize();
+    
+    const server = configEngine.getServerConfiguration(serverId);
+    if (!server) {
+      console.error(`Server not found: ${serverId}`);
+      process.exit(1);
+    }
+    
+    await configEngine.updateServerConfiguration({
+      ...server,
+      enabled: false
+    });
+    
+    console.log(`Server ${server.name} (${serverId}) disabled`);
+  });
+
+// Start server command
+program
+  .command('start <serverId>')
+  .description('Start an MCP server')
+  .action(async (serverId) => {
+    await initialize();
+    
+    try {
+      await serverManager.startServer(serverId);
+      console.log(`Server ${serverId} started`);
+    } catch (error) {
+      console.error(`Failed to start server: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+// Stop server command
+program
+  .command('stop <serverId>')
+  .description('Stop an MCP server')
+  .action(async (serverId) => {
+    await initialize();
+    
+    try {
+      await serverManager.stopServer(serverId);
+      console.log(`Server ${serverId} stopped`);
+    } catch (error) {
+      console.error(`Failed to stop server: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+// Sync command
+program
+  .command('sync')
+  .description('Synchronize configurations across applications')
+  .option('-a, --app <appId>', 'Sync only to specific application')
+  .action(async (options) => {
+    await initialize();
+    
+    const servers = configEngine.getServerConfigurations();
+    
+    try {
+      if (options.app) {
+        // Sync to specific app
+        // Implementation needed
+        console.log(`Syncing to ${options.app}...`);
+      } else {
+        // Sync to all apps
+        await configEngine.syncToApplications(servers);
+        console.log('Synchronized configurations to all applications');
+      }
+    } catch (error) {
+      console.error(`Sync failed: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+// Import command
+program
+  .command('import <file>')
+  .description('Import configurations from file')
+  .action(async (file) => {
+    await initialize();
+    
+    try {
+      // Implementation needed
+      console.log(`Imported configurations from ${file}`);
+    } catch (error) {
+      console.error(`Import failed: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+// Export command
+program
+  .command('export <file>')
+  .description('Export configurations to file')
+  .action(async (file) => {
+    await initialize();
+    
+    try {
+      // Implementation needed
+      console.log(`Exported configurations to ${file}`);
+    } catch (error) {
+      console.error(`Export failed: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+program.parse();
+```
+
+Package the CLI tool for easy installation:
+
+```json
+// package.json
+{
+  "name": "mcp-control-cli",
+  "version": "1.0.0",
+  "description": "CLI for MCP Control Lite",
+  "main": "dist/cli.js",
+  "bin": {
+    "mcp-control": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublish": "npm run build"
+  },
+  "dependencies": {
+    "commander": "^9.0.0"
+  }
+}
+```
+
+Ensure the CLI shares the same core logic as the GUI application to maintain consistency.
+
+# Test Strategy:
+1. Unit tests for each CLI command
+2. Integration tests with the core engine
+3. Test output formatting (plain text and JSON)
+4. Test error handling and exit codes
+5. Test with mock file system and configurations
+6. End-to-end tests for key workflows
+7. Test performance with large configuration sets
+8. Test in different shell environments (bash, zsh)
+9. Test command completion functionality
+10. Test help text and documentation
+
+# Subtasks:
+## 1. Add Server Management CLI Commands [done]
+### Dependencies: None
+### Description: Add server management commands to the CLI interface
+### Details:
+Extend the existing CLI with server management commands:
+- discover-servers: Scan for available MCP servers
+- list-servers: Show installed and available servers
+- install-server: Install a server from available registry
+- remove-server: Uninstall a server
+- start-server: Start an MCP server process
+- stop-server: Stop a running MCP server
+- server-status: Show status of all servers
+

@@ -8,7 +8,8 @@ import {
   FileText,
   RefreshCw,
   Edit,
-  Search
+  Search,
+  Plus
 } from 'lucide-react';
 import { Application, ViewType } from './types';
 import Settings from './components/Settings';
@@ -28,6 +29,7 @@ function App() {
     name: string;
     application: string;
   } | null>(null);
+  const [showingManualAdd, setShowingManualAdd] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -220,6 +222,26 @@ function App() {
     </div>
   );
 
+  const handleDeleteServer = async (serverName: string) => {
+    console.log('Delete button clicked for server:', serverName);
+    
+    if (!confirm(`Are you sure you want to delete the server "${serverName}"? This will remove it from all MCP client configurations.`)) {
+      console.log('Delete cancelled by user');
+      return;
+    }
+    
+    console.log('Attempting to delete server:', serverName);
+    
+    try {
+      await invoke('delete_server', { serverName });
+      console.log('Delete successful, refreshing data');
+      await loadData(); // Refresh the data
+    } catch (error) {
+      console.error('Failed to delete server:', error);
+      alert('Failed to delete server. Please try again.');
+    }
+  };
+
   const handleToggleAllApps = async (serverName: string, enabled: boolean) => {
     try {
       const server = consolidatedServers.find(s => s.name === serverName);
@@ -245,10 +267,25 @@ function App() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <h2>MCP Servers</h2>
-        <button className="btn btn-primary" onClick={loadData}>
-          <RefreshCw size={16} style={{ marginRight: '8px' }} />
-          Refresh
-        </button>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <button 
+            onClick={() => alert('TEST BUTTON WORKS!')}
+            style={{ background: 'blue', color: 'white', padding: '8px' }}
+          >
+            TEST
+          </button>
+          <button 
+            className="btn btn-secondary" 
+            onClick={() => setShowingManualAdd(true)}
+          >
+            <Plus size={16} style={{ marginRight: '8px' }} />
+            Add Server
+          </button>
+          <button className="btn btn-primary" onClick={loadData}>
+            <RefreshCw size={16} style={{ marginRight: '8px' }} />
+            Refresh
+          </button>
+        </div>
       </div>
       
       {systemStatus && (
@@ -306,6 +343,24 @@ function App() {
                     title="Configure server"
                   >
                     <Edit size={16} />
+                  </button>
+                  
+                  <button
+                    onClick={() => {
+                      alert('Delete button clicked!');
+                      handleDeleteServer(server.name);
+                    }}
+                    style={{
+                      background: 'red',
+                      border: '2px solid black',
+                      cursor: 'pointer',
+                      color: 'white',
+                      padding: '8px',
+                      fontSize: '12px'
+                    }}
+                    title="Delete server"
+                  >
+                    DELETE
                   </button>
                   
                   <div 
@@ -521,6 +576,20 @@ function App() {
             setSelectedServer(null);
             loadData(); // Refresh data after save
           }}
+        />
+      )}
+      
+      {showingManualAdd && (
+        <ServerDetail
+          serverId="new-server"
+          serverName="New Server"
+          application="Amazon Q Developer"
+          onClose={() => setShowingManualAdd(false)}
+          onSave={() => {
+            setShowingManualAdd(false);
+            loadData(); // Refresh data after save
+          }}
+          isNewServer={true}
         />
       )}
     </div>

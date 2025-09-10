@@ -30,9 +30,10 @@ interface ServerDetailProps {
   application: string;
   onClose: () => void;
   onSave: () => void;
+  isNewServer?: boolean;
 }
 
-export default function ServerDetail({ serverId, serverName, application, onClose, onSave }: ServerDetailProps) {
+export default function ServerDetail({ serverId, serverName, application, onClose, onSave, isNewServer = false }: ServerDetailProps) {
   const [config, setConfig] = useState<ServerConfig>({
     name: serverName,
     description: '',
@@ -54,8 +55,12 @@ export default function ServerDetail({ serverId, serverName, application, onClos
   const [jsonEditor, setJsonEditor] = useState<string>('');
 
   useEffect(() => {
-    loadServerConfig();
-  }, [serverId]);
+    if (!isNewServer) {
+      loadServerConfig();
+    } else {
+      setLoading(false);
+    }
+  }, [serverId, isNewServer]);
 
   useEffect(() => {
     if (activeTab === 'editor') {
@@ -86,17 +91,25 @@ export default function ServerDetail({ serverId, serverName, application, onClos
     setSaving(true);
     setMessage(null);
     try {
-      await invoke('save_server_config', { 
-        serverId, 
-        application, 
-        config 
-      });
-      setMessage('Configuration saved successfully!');
+      if (isNewServer) {
+        await invoke('create_server', { 
+          application, 
+          config 
+        });
+        setMessage('Server created successfully!');
+      } else {
+        await invoke('save_server_config', { 
+          serverId, 
+          application, 
+          config 
+        });
+        setMessage('Configuration saved successfully!');
+      }
       setTimeout(() => setMessage(null), 3000);
       onSave();
     } catch (error) {
       console.error('Failed to save config:', error);
-      setMessage('Failed to save configuration');
+      setMessage(isNewServer ? 'Failed to create server' : 'Failed to save configuration');
     } finally {
       setSaving(false);
     }

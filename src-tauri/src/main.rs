@@ -349,6 +349,16 @@ async fn search_mcp_packages(query: String, filter: String, source: String) -> R
         all_results.extend(pulsemcp_packages);
     }
     
+    // Check which packages are already installed/configured
+    if let Ok(installed_packages) = get_installed_package_names().await {
+        for result in &mut all_results {
+            if let Some(name) = result.get("name").and_then(|n| n.as_str()) {
+                let is_installed = installed_packages.contains(name);
+                result.as_object_mut().unwrap().insert("installed".to_string(), serde_json::Value::Bool(is_installed));
+            }
+        }
+    }
+    
     // Apply filter sorting
     match filter.as_str() {
         "popular" => {
@@ -511,6 +521,7 @@ async fn search_github_repositories(query: &str) -> Result<Vec<serde_json::Value
 
 async fn search_npm_packages(query: &str, _filter: &str) -> Result<Vec<serde_json::Value>, String> {
     use std::process::Command;
+    use std::env;
     
     let search_term = if query.trim().is_empty() {
         "mcp server".to_string()
@@ -518,9 +529,18 @@ async fn search_npm_packages(query: &str, _filter: &str) -> Result<Vec<serde_jso
         format!("mcp {}", query)
     };
     
+    // Set working directory to user's home directory
+    let home_dir = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    
+    // Create a comprehensive shell command that sources environment
+    let shell_cmd = format!(
+        "cd '{}' && source ~/.zshrc 2>/dev/null || source ~/.bashrc 2>/dev/null || source ~/.profile 2>/dev/null || true; export PATH=\"$HOME/.nvm/versions/node/$(nvm current)/bin:$PATH\" 2>/dev/null || true; npm search '{}' --json",
+        home_dir, search_term
+    );
+    
     let output = Command::new("sh")
         .arg("-c")
-        .arg(&format!("source ~/.zshrc 2>/dev/null || source ~/.bashrc 2>/dev/null || true; npm search '{}' --json", search_term))
+        .arg(&shell_cmd)
         .output()
         .map_err(|e| format!("Failed to execute npm search: {}", e))?;
     
@@ -593,26 +613,51 @@ async fn search_npm_packages(query: &str, _filter: &str) -> Result<Vec<serde_jso
 #[tauri::command]
 async fn install_mcp_package(package_name: String) -> Result<(), String> {
     use std::process::Command;
+    use std::env;
     
     let install_msg = format!("🔧 Installing MCP package: {}", package_name);
     println!("{}", install_msg);
     log::info!("{}", install_msg);
     
-    // Use npm install directly instead of CLI
-    let mut cmd = Command::new("npm");
-    cmd.arg("install")
-       .arg("-g")
-       .arg(&package_name);
+    // Set working directory to user's home directory
+    let home_dir = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    println!("Using working directory: {}", home_dir);
+    
+    // Create a comprehensive shell command that sources environment
+    let shell_cmd = format!(
+        "cd '{}' && source ~/.zshrc 2>/dev/null || source ~/.bashrc 2>/dev/null || source ~/.profile 2>/dev/null || true; export PATH=\"$HOME/.nvm/versions/node/$(nvm current)/bin:$PATH\" 2>/dev/null || true; npm install '{}'",
+        home_dir, package_name
+    );
+    
+    let mut cmd = if cfg!(target_os = "windows") {
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", &shell_cmd]);
+        cmd
+    } else {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", &shell_cmd]);
+        cmd
+    };
+    
+    println!("Running npm install for: {} in directory: {}", package_name, home_dir);
     
     let output = cmd.output().map_err(|e| {
         let error_msg = format!("❌ Failed to execute install command for {}: {}", package_name, e);
+        println!("{}", error_msg);
         log::error!("{}", error_msg);
         error_msg
     })?;
     
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    
+    println!("Exit status: {}", output.status);
+    println!("STDOUT: {}", stdout);
+    println!("STDERR: {}", stderr);
+    
     if !output.status.success() {
-        let error = String::from_utf8_lossy(&output.stderr);
-        let error_msg = format!("❌ Installation failed for {}: {}", package_name, error);
+        let error_msg = format!("❌ Installation failed for {}: {}", package_name, stderr);
+        println!("{}", error_msg);
         log::error!("{}", error_msg);
         return Err(error_msg);
     }
@@ -621,13 +666,238 @@ async fn install_mcp_package(package_name: String) -> Result<(), String> {
     println!("{}", success_msg);
     log::info!("{}", success_msg);
     
-    // Also log the installation output for debugging
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if !stdout.trim().is_empty() {
-        log::info!("Installation output: {}", stdout.trim());
+    // Now add the server to Amazon Q Developer configuration
+    if let Err(e) = add_server_to_config(&package_name).await {
+        println!("⚠️ Warning: Failed to add server to configuration: {}", e);
+        // Don't fail the entire operation, just warn
     }
     
     Ok(())
+}
+
+async fn add_server_to_config(package_name: &str) -> Result<(), String> {
+    use std::path::PathBuf;
+    
+    // Find Amazon Q Developer config
+    let mut detector = ApplicationDetector::new().map_err(|e| e.to_string())?;
+    let results = detector.detect_all_applications().await.map_err(|e| e.to_string())?;
+    
+    for result in &results {
+        if result.profile.name == "Amazon Q Developer" && result.detected {
+            if let Some(config_path) = &result.found_paths.config_file {
+                println!("Adding {} to Amazon Q Developer config at: {:?}", package_name, config_path);
+                
+                // Read existing config
+                let content = tokio::fs::read_to_string(config_path).await
+                    .map_err(|e| format!("Failed to read config: {}", e))?;
+                
+                let mut config: serde_json::Value = serde_json::from_str(&content)
+                    .map_err(|e| format!("Failed to parse config: {}", e))?;
+                
+                // Get or create mcpServers object
+                if !config.get("mcpServers").is_some() {
+                    config["mcpServers"] = serde_json::json!({});
+                }
+                
+                let mcp_servers = config["mcpServers"].as_object_mut()
+                    .ok_or("mcpServers is not an object")?;
+                
+                // Create server name from package name
+                let server_name = package_name.split('/').last().unwrap_or(package_name)
+                    .replace('@', "").replace('-', "_");
+                
+                // Add the server configuration
+                mcp_servers.insert(server_name.clone(), serde_json::json!({
+                    "command": "npx",
+                    "args": [package_name]
+                }));
+                
+                // Write back to config
+                let updated_content = serde_json::to_string_pretty(&config)
+                    .map_err(|e| format!("Failed to serialize config: {}", e))?;
+                
+                tokio::fs::write(config_path, updated_content).await
+                    .map_err(|e| format!("Failed to write config: {}", e))?;
+                
+                println!("✅ Added {} as '{}' to Amazon Q Developer configuration", package_name, server_name);
+                return Ok(());
+            }
+        }
+    }
+    
+    Err("Amazon Q Developer configuration not found".to_string())
+}
+
+async fn get_installed_package_names() -> Result<std::collections::HashSet<String>, String> {
+    let mut installed_packages = std::collections::HashSet::new();
+    
+    // Check all detected applications for configured MCP servers
+    let mut detector = ApplicationDetector::new().map_err(|e| e.to_string())?;
+    let results = detector.detect_all_applications().await.map_err(|e| e.to_string())?;
+    
+    for result in &results {
+        if result.detected {
+            if let Some(config_path) = &result.found_paths.config_file {
+                if let Ok(content) = tokio::fs::read_to_string(config_path).await {
+                    if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(mcp_servers) = config.get("mcpServers").and_then(|s| s.as_object()) {
+                            for (_, server_config) in mcp_servers {
+                                // Extract package name from args if using npx
+                                if let Some(command) = server_config.get("command").and_then(|c| c.as_str()) {
+                                    if command == "npx" {
+                                        if let Some(args) = server_config.get("args").and_then(|a| a.as_array()) {
+                                            if let Some(package_name) = args.get(0).and_then(|p| p.as_str()) {
+                                                installed_packages.insert(package_name.to_string());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    Ok(installed_packages)
+}
+
+#[tauri::command]
+async fn delete_server(server_name: String) -> Result<(), String> {
+    println!("🗑️ Deleting server: {}", server_name);
+    log::info!("Deleting server: {}", server_name);
+    
+    // Get all detected applications
+    let mut detector = ApplicationDetector::new().map_err(|e| e.to_string())?;
+    let results = detector.detect_all_applications().await.map_err(|e| e.to_string())?;
+    
+    let mut deleted_from_apps = Vec::new();
+    
+    for result in &results {
+        if result.detected {
+            if let Some(config_path) = &result.found_paths.config_file {
+                println!("Checking config: {:?}", config_path);
+                
+                // Read existing config
+                if let Ok(content) = tokio::fs::read_to_string(config_path).await {
+                    if let Ok(mut config) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(mcp_servers) = config.get_mut("mcpServers").and_then(|s| s.as_object_mut()) {
+                            println!("Found mcpServers with keys: {:?}", mcp_servers.keys().collect::<Vec<_>>());
+                            
+                            // Remove servers with matching name (handle variations)
+                            let keys_to_remove: Vec<String> = mcp_servers.keys()
+                                .filter(|key| {
+                                    let matches = key.as_str() == &server_name || 
+                                        key.replace('_', "-") == server_name ||
+                                        key.replace('-', "_") == server_name ||
+                                        key.to_lowercase() == server_name.to_lowercase();
+                                    
+                                    if matches {
+                                        println!("Found matching key: {} for server: {}", key, server_name);
+                                    }
+                                    matches
+                                })
+                                .cloned()
+                                .collect();
+                            
+                            println!("Keys to remove: {:?}", keys_to_remove);
+                            
+                            for key in &keys_to_remove {
+                                mcp_servers.remove(key);
+                                println!("Removed '{}' from {}", key, result.profile.name);
+                            }
+                            
+                            if !keys_to_remove.is_empty() {
+                                // Write back to config
+                                let updated_content = serde_json::to_string_pretty(&config)
+                                    .map_err(|e| format!("Failed to serialize config: {}", e))?;
+                                
+                                tokio::fs::write(config_path, updated_content).await
+                                    .map_err(|e| format!("Failed to write config: {}", e))?;
+                                
+                                deleted_from_apps.push(result.profile.name.clone());
+                            }
+                        } else {
+                            println!("No mcpServers found in config");
+                        }
+                    } else {
+                        println!("Failed to parse config as JSON");
+                    }
+                } else {
+                    println!("Failed to read config file");
+                }
+            }
+        }
+    }
+    
+    if deleted_from_apps.is_empty() {
+        let error_msg = format!("Server '{}' not found in any MCP configurations", server_name);
+        println!("❌ {}", error_msg);
+        return Err(error_msg);
+    }
+    
+    let success_msg = format!("✅ Successfully deleted '{}' from: {}", server_name, deleted_from_apps.join(", "));
+    println!("{}", success_msg);
+    log::info!("{}", success_msg);
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn create_server(application: String, config: serde_json::Value) -> Result<(), String> {
+    let server_name = config.get("name").and_then(|n| n.as_str())
+        .ok_or("Server name is required")?;
+    
+    println!("🆕 Creating new server: {} for {}", server_name, application);
+    log::info!("Creating new server: {} for {}", server_name, application);
+    
+    // Find the application config
+    let mut detector = ApplicationDetector::new().map_err(|e| e.to_string())?;
+    let results = detector.detect_all_applications().await.map_err(|e| e.to_string())?;
+    
+    for result in &results {
+        if result.profile.name == application && result.detected {
+            if let Some(config_path) = &result.found_paths.config_file {
+                // Read existing config
+                let content = tokio::fs::read_to_string(config_path).await
+                    .map_err(|e| format!("Failed to read config: {}", e))?;
+                
+                let mut app_config: serde_json::Value = serde_json::from_str(&content)
+                    .map_err(|e| format!("Failed to parse config: {}", e))?;
+                
+                // Get or create mcpServers object
+                if !app_config.get("mcpServers").is_some() {
+                    app_config["mcpServers"] = serde_json::json!({});
+                }
+                
+                let mcp_servers = app_config["mcpServers"].as_object_mut()
+                    .ok_or("mcpServers is not an object")?;
+                
+                // Create server configuration
+                let server_config = serde_json::json!({
+                    "command": config.get("command").unwrap_or(&serde_json::Value::String("npx".to_string())),
+                    "args": config.get("args").unwrap_or(&serde_json::Value::Array(vec![])),
+                    "env": config.get("env").unwrap_or(&serde_json::Value::Object(serde_json::Map::new()))
+                });
+                
+                // Add the server
+                mcp_servers.insert(server_name.to_string(), server_config);
+                
+                // Write back to config
+                let updated_content = serde_json::to_string_pretty(&app_config)
+                    .map_err(|e| format!("Failed to serialize config: {}", e))?;
+                
+                tokio::fs::write(config_path, updated_content).await
+                    .map_err(|e| format!("Failed to write config: {}", e))?;
+                
+                println!("✅ Created server '{}' in {}", server_name, application);
+                return Ok(());
+            }
+        }
+    }
+    
+    Err(format!("Application '{}' not found or not configured", application))
 }
 
 #[tauri::command]
@@ -789,7 +1059,9 @@ async fn main() {
                 sync_application,
                 show_notification,
                 search_mcp_packages,
-                install_mcp_package
+                install_mcp_package,
+                delete_server,
+                create_server
             ])
             .run(tauri::generate_context!())
             .expect("error while running tauri application");

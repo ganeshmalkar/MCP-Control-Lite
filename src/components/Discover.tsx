@@ -24,7 +24,7 @@ export default function Discover({ onInstallComplete }: DiscoverProps) {
   const [loading, setLoading] = useState(false);
   const [installing, setInstalling] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<'all' | 'popular' | 'recent'>('all');
-  const [source, setSource] = useState<'npm' | 'github' | 'local'>('npm');
+  const [source, setSource] = useState<'npm' | 'github' | 'pulsemcp'>('npm');
 
   useEffect(() => {
     if (searchTerm.trim()) {
@@ -179,9 +179,9 @@ export default function Discover({ onInstallComplete }: DiscoverProps) {
               Source:
             </label>
             {[
-              { key: 'npm', label: 'NPM + PulseMCP' },
+              { key: 'npm', label: 'NPM' },
               { key: 'github', label: 'GitHub' },
-              { key: 'local', label: 'Local' }
+              { key: 'pulsemcp', label: 'PulseMCP' }
             ].map(({ key, label }) => (
               <button
                 key={key}

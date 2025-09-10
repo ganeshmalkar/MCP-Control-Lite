@@ -138,22 +138,25 @@ export default function Discover() {
             <label style={{ color: 'var(--text-primary)', fontSize: '14px', display: 'flex', alignItems: 'center' }}>
               Source:
             </label>
-            {['npm', 'github', 'local'].map(sourceOption => (
+            {[
+              { key: 'npm', label: 'NPM + PulseMCP' },
+              { key: 'github', label: 'GitHub' },
+              { key: 'local', label: 'Local' }
+            ].map(({ key, label }) => (
               <button
-                key={sourceOption}
-                onClick={() => setSource(sourceOption as any)}
+                key={key}
+                onClick={() => setSource(key as any)}
                 style={{
                   padding: '4px 8px',
                   border: '1px solid var(--border-color)',
                   borderRadius: '4px',
-                  background: source === sourceOption ? '#3498db' : 'var(--bg-primary)',
-                  color: source === sourceOption ? 'white' : 'var(--text-primary)',
+                  background: source === key ? '#3498db' : 'var(--bg-primary)',
+                  color: source === key ? 'white' : 'var(--text-primary)',
                   cursor: 'pointer',
-                  textTransform: 'capitalize',
                   fontSize: '12px'
                 }}
               >
-                {sourceOption}
+                {label}
               </button>
             ))}
           </div>

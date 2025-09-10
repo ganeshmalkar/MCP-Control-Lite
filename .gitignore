@@ -36,6 +36,19 @@ src-tauri/Cargo.lock
 *.sln
 *.sw?
 
+# AI Agent Configurations
+.cursor/
+.continue/
+.cline/
+.aider/
+.windsurf/
+.claude/
+.copilot/
+
+# Project-specific
+releases/
+.taskmaster/
+
 # OS
 .DS_Store
 .DS_Store?

@@ -262,32 +262,125 @@ async fn get_server_config(server_id: String, application: String) -> Result<ser
 }
 
 #[tauri::command]
-async fn search_mcp_packages(query: String, filter: String) -> Result<Vec<serde_json::Value>, String> {
-    // For now, return demo data - can be enhanced to search actual npm registry
-    Ok(vec![
-        serde_json::json!({
-            "name": "filesystem",
-            "description": "File system operations for MCP",
-            "version": "1.2.0",
-            "author": "Anthropic",
-            "keywords": ["filesystem", "files", "directory"],
-            "repository": "https://github.com/anthropics/mcp-filesystem",
-            "downloads": 15420,
-            "rating": 4.8,
-            "installed": false
-        }),
-        serde_json::json!({
-            "name": "weather-api",
-            "description": "Weather data integration for MCP",
-            "version": "0.8.1",
-            "author": "WeatherCorp",
-            "keywords": ["weather", "api", "forecast"],
-            "repository": "https://github.com/weathercorp/mcp-weather",
-            "downloads": 8930,
-            "rating": 4.5,
-            "installed": true
-        })
-    ])
+async fn search_mcp_packages(query: String, filter: String, source: String) -> Result<Vec<serde_json::Value>, String> {
+    println!("Searching for '{}' with filter '{}' from source '{}'", query, filter, source);
+    
+    // Simulate different results based on search term and source
+    let mut results = Vec::new();
+    
+    match source.as_str() {
+        "npm" => {
+            if query.is_empty() || query.to_lowercase().contains("filesystem") {
+                results.push(serde_json::json!({
+                    "name": "@modelcontextprotocol/server-filesystem",
+                    "description": "MCP server for filesystem operations",
+                    "version": "0.4.0",
+                    "author": "Anthropic",
+                    "keywords": ["mcp", "filesystem", "files"],
+                    "repository": "https://github.com/modelcontextprotocol/servers",
+                    "downloads": 25420,
+                    "rating": 4.9,
+                    "installed": false
+                }));
+            }
+            
+            if query.is_empty() || query.to_lowercase().contains("gemini") {
+                results.push(serde_json::json!({
+                    "name": "@modelcontextprotocol/server-gemini",
+                    "description": "MCP server for Google Gemini API integration",
+                    "version": "0.2.1",
+                    "author": "Google",
+                    "keywords": ["mcp", "gemini", "ai", "google"],
+                    "repository": "https://github.com/modelcontextprotocol/servers",
+                    "downloads": 18930,
+                    "rating": 4.7,
+                    "installed": false
+                }));
+            }
+            
+            if query.is_empty() || query.to_lowercase().contains("weather") {
+                results.push(serde_json::json!({
+                    "name": "@modelcontextprotocol/server-weather",
+                    "description": "MCP server for weather data and forecasts",
+                    "version": "0.3.2",
+                    "author": "MCP Community",
+                    "keywords": ["mcp", "weather", "api", "forecast"],
+                    "repository": "https://github.com/modelcontextprotocol/servers",
+                    "downloads": 12100,
+                    "rating": 4.5,
+                    "installed": false
+                }));
+            }
+            
+            if query.is_empty() || query.to_lowercase().contains("database") || query.to_lowercase().contains("sql") {
+                results.push(serde_json::json!({
+                    "name": "@modelcontextprotocol/server-postgres",
+                    "description": "MCP server for PostgreSQL database operations",
+                    "version": "0.5.0",
+                    "author": "MCP Community",
+                    "keywords": ["mcp", "database", "postgres", "sql"],
+                    "repository": "https://github.com/modelcontextprotocol/servers",
+                    "downloads": 15600,
+                    "rating": 4.8,
+                    "installed": false
+                }));
+            }
+        },
+        "github" => {
+            if query.is_empty() || query.to_lowercase().contains("gemini") {
+                results.push(serde_json::json!({
+                    "name": "mcp-gemini-server",
+                    "description": "Unofficial Gemini MCP server with advanced features",
+                    "version": "1.0.3",
+                    "author": "community-dev",
+                    "keywords": ["gemini", "mcp", "ai", "server"],
+                    "repository": "https://github.com/community-dev/mcp-gemini-server",
+                    "downloads": 8420,
+                    "rating": 4.6,
+                    "installed": false
+                }));
+            }
+            
+            if query.is_empty() || query.to_lowercase().contains("custom") {
+                results.push(serde_json::json!({
+                    "name": "custom-mcp-toolkit",
+                    "description": "Custom MCP server toolkit for building your own servers",
+                    "version": "2.1.0",
+                    "author": "mcp-toolkit",
+                    "keywords": ["mcp", "toolkit", "custom", "builder"],
+                    "repository": "https://github.com/mcp-toolkit/custom-server",
+                    "downloads": 5200,
+                    "rating": 4.4,
+                    "installed": false
+                }));
+            }
+        },
+        "local" => {
+            results.push(serde_json::json!({
+                "name": "local-dev-server",
+                "description": "Local development MCP server",
+                "version": "dev",
+                "author": "Local",
+                "keywords": ["local", "development"],
+                "repository": null,
+                "downloads": null,
+                "rating": null,
+                "installed": true
+            }));
+        },
+        _ => {}
+    }
+    
+    // Apply filter
+    if filter == "popular" {
+        results.sort_by(|a, b| {
+            let downloads_a = a.get("downloads").and_then(|d| d.as_u64()).unwrap_or(0);
+            let downloads_b = b.get("downloads").and_then(|d| d.as_u64()).unwrap_or(0);
+            downloads_b.cmp(&downloads_a)
+        });
+    }
+    
+    Ok(results)
 }
 
 #[tauri::command]

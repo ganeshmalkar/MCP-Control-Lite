@@ -20,76 +20,41 @@ export default function Discover() {
   const [loading, setLoading] = useState(false);
   const [installing, setInstalling] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<'all' | 'popular' | 'recent'>('all');
+  const [source, setSource] = useState<'npm' | 'github' | 'local'>('npm');
 
   useEffect(() => {
     loadPopularPackages();
-  }, []);
+  }, [source]); // Reload when source changes
 
   const loadPopularPackages = async () => {
     setLoading(true);
     try {
       const popularPackages = await invoke<MCPServerPackage[]>('search_mcp_packages', { 
         query: '', 
-        filter: 'popular' 
+        filter: 'popular',
+        source 
       });
       setPackages(popularPackages);
     } catch (error) {
       console.error('Failed to load packages:', error);
-      // Demo data for now
-      setPackages([
-        {
-          name: 'filesystem',
-          description: 'File system operations for MCP',
-          version: '1.2.0',
-          author: 'Anthropic',
-          keywords: ['filesystem', 'files', 'directory'],
-          repository: 'https://github.com/anthropics/mcp-filesystem',
-          downloads: 15420,
-          rating: 4.8,
-          installed: false
-        },
-        {
-          name: 'weather-api',
-          description: 'Weather data integration for MCP',
-          version: '0.8.1',
-          author: 'WeatherCorp',
-          keywords: ['weather', 'api', 'forecast'],
-          repository: 'https://github.com/weathercorp/mcp-weather',
-          downloads: 8930,
-          rating: 4.5,
-          installed: true
-        },
-        {
-          name: 'database-connector',
-          description: 'Database connectivity for MCP servers',
-          version: '2.1.3',
-          author: 'DBTools',
-          keywords: ['database', 'sql', 'connector'],
-          downloads: 12100,
-          rating: 4.7,
-          installed: false
-        }
-      ]);
+      setPackages([]);
     } finally {
       setLoading(false);
     }
   };
 
   const searchPackages = async () => {
-    if (!searchTerm.trim()) {
-      loadPopularPackages();
-      return;
-    }
-
     setLoading(true);
     try {
       const results = await invoke<MCPServerPackage[]>('search_mcp_packages', { 
-        query: searchTerm,
-        filter 
+        query: searchTerm.trim(),
+        filter,
+        source 
       });
       setPackages(results);
     } catch (error) {
       console.error('Search failed:', error);
+      setPackages([]);
     } finally {
       setLoading(false);
     }
@@ -168,7 +133,36 @@ export default function Discover() {
           </button>
         </div>
 
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <label style={{ color: 'var(--text-primary)', fontSize: '14px', display: 'flex', alignItems: 'center' }}>
+              Source:
+            </label>
+            {['npm', 'github', 'local'].map(sourceOption => (
+              <button
+                key={sourceOption}
+                onClick={() => setSource(sourceOption as any)}
+                style={{
+                  padding: '4px 8px',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '4px',
+                  background: source === sourceOption ? '#3498db' : 'var(--bg-primary)',
+                  color: source === sourceOption ? 'white' : 'var(--text-primary)',
+                  cursor: 'pointer',
+                  textTransform: 'capitalize',
+                  fontSize: '12px'
+                }}
+              >
+                {sourceOption}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div style={{ display: 'flex', gap: '8px' }}>
+          <label style={{ color: 'var(--text-primary)', fontSize: '14px', display: 'flex', alignItems: 'center' }}>
+            Filter:
+          </label>
           {['all', 'popular', 'recent'].map(filterOption => (
             <button
               key={filterOption}

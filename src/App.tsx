@@ -462,7 +462,7 @@ function App() {
     </div>
   );
 
-  const renderDiscoverView = () => <Discover />;
+  const renderDiscoverView = () => <Discover onInstallComplete={loadData} />;
 
   const renderSettingsView = () => <Settings onSettingsSaved={loadData} />;
 

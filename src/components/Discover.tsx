@@ -14,7 +14,11 @@ interface MCPServerPackage {
   installed: boolean;
 }
 
-export default function Discover() {
+interface DiscoverProps {
+  onInstallComplete?: () => void;
+}
+
+export default function Discover({ onInstallComplete }: DiscoverProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [packages, setPackages] = useState<MCPServerPackage[]>([]);
   const [loading, setLoading] = useState(false);
@@ -68,6 +72,11 @@ export default function Discover() {
       setPackages(prev => prev.map(pkg => 
         pkg.name === packageName ? { ...pkg, installed: true } : pkg
       ));
+      
+      // Refresh main app data if callback provided
+      if (onInstallComplete) {
+        onInstallComplete();
+      }
     } catch (error) {
       console.error('Installation failed:', error);
     } finally {
@@ -249,7 +258,16 @@ export default function Discover() {
                   
                   {pkg.keywords.length > 0 && (
                     <div style={{ marginTop: '8px', display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                      {pkg.keywords.slice(0, 5).map(keyword => (
+                      {pkg.keywords
+                        .filter(keyword => 
+                          keyword !== 'server' && 
+                          keyword !== 'from' && 
+                          keyword !== 'registry' &&
+                          keyword !== 'mcp' &&
+                          keyword.length > 2
+                        )
+                        .slice(0, 5)
+                        .map(keyword => (
                         <span key={keyword} style={{
                           fontSize: '11px',
                           background: keyword === 'npm' ? '#cb3837' : 
@@ -270,7 +288,9 @@ export default function Discover() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   {pkg.repository && (
                     <button
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
                         if (pkg.repository) {
                           window.open(pkg.repository, '_blank');
                         }

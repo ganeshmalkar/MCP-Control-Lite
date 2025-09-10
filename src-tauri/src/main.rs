@@ -359,10 +359,12 @@ async fn search_mcp_packages(query: String, filter: String, source: String) -> R
                     let mut keywords = Vec::new();
                     keywords.push(detected_source.to_string());
                     
-                    // Add meaningful keywords from description
+                    // Add meaningful keywords from description, filtering out generic terms
                     for word in description.split_whitespace() {
                         let clean_word = word.to_lowercase().trim_matches(|c: char| !c.is_alphanumeric()).to_string();
-                        if clean_word.len() > 3 && !keywords.contains(&clean_word) {
+                        if clean_word.len() > 3 && 
+                           !keywords.contains(&clean_word) &&
+                           !["server", "from", "registry", "protocol", "context", "model"].contains(&clean_word.as_str()) {
                             keywords.push(clean_word);
                         }
                     }
@@ -456,6 +458,7 @@ async fn search_npm_packages(query: &str, filter: &str) -> Result<Vec<serde_json
                 let mut kw = vec!["npm".to_string()];
                 kw.extend(arr.iter()
                     .filter_map(|v| v.as_str())
+                    .filter(|s| !["server", "from", "registry", "protocol", "context", "model"].contains(s))
                     .take(4)
                     .map(|s| s.to_string()));
                 kw
@@ -491,9 +494,22 @@ async fn search_npm_packages(query: &str, filter: &str) -> Result<Vec<serde_json
 
 #[tauri::command]
 async fn install_mcp_package(package_name: String) -> Result<(), String> {
-    // Simulate installation
+    use std::process::Command;
+    
     println!("Installing MCP package: {}", package_name);
-    tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+    
+    // Use the actual CLI install command
+    let mut cmd = Command::new("mcpctl");
+    cmd.arg("install").arg(&package_name);
+    
+    let output = cmd.output().map_err(|e| format!("Failed to execute install: {}", e))?;
+    
+    if !output.status.success() {
+        let error = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Installation failed: {}", error));
+    }
+    
+    println!("Successfully installed: {}", package_name);
     Ok(())
 }
 

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Search, Download, Star, ExternalLink, Package, RefreshCw } from 'lucide-react';
+import { Search, Download, Star, ExternalLink, Package, RefreshCw, X } from 'lucide-react';
 
 interface MCPServerPackage {
   name: string;
@@ -27,7 +27,11 @@ export default function Discover({ onInstallComplete }: DiscoverProps) {
   const [source, setSource] = useState<'npm' | 'github' | 'local'>('npm');
 
   useEffect(() => {
-    loadPopularPackages();
+    if (searchTerm.trim()) {
+      searchPackages();
+    } else {
+      loadPopularPackages();
+    }
   }, [source]); // Reload when source changes
 
   const loadPopularPackages = async () => {
@@ -90,6 +94,11 @@ export default function Discover({ onInstallComplete }: DiscoverProps) {
     }
   };
 
+  const clearSearch = () => {
+    setSearchTerm('');
+    loadPopularPackages();
+  };
+
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       searchPackages();
@@ -123,6 +132,25 @@ export default function Discover({ onInstallComplete }: DiscoverProps) {
               transform: 'translateY(-50%)', 
               color: 'var(--text-secondary)' 
             }} />
+            {searchTerm && (
+              <button
+                onClick={clearSearch}
+                style={{
+                  position: 'absolute',
+                  right: '12px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--text-secondary)',
+                  padding: '2px'
+                }}
+                title="Clear search"
+              >
+                <X size={14} />
+              </button>
+            )}
             <input
               type="text"
               placeholder="Search MCP servers..."
@@ -132,6 +160,7 @@ export default function Discover({ onInstallComplete }: DiscoverProps) {
               style={{
                 width: '100%',
                 padding: '8px 8px 8px 40px',
+                paddingRight: searchTerm ? '40px' : '8px',
                 border: '1px solid var(--border-color)',
                 borderRadius: '4px',
                 background: 'var(--bg-primary)',
@@ -338,15 +367,21 @@ export default function Discover({ onInstallComplete }: DiscoverProps) {
                       )}
                     </button>
                   ) : (
-                    <span style={{
-                      fontSize: '12px',
-                      color: '#27ae60',
-                      padding: '6px 12px',
-                      background: '#e8f5e8',
-                      borderRadius: '4px'
-                    }}>
+                    <button
+                      disabled={true}
+                      style={{
+                        fontSize: '12px',
+                        color: '#27ae60',
+                        padding: '6px 12px',
+                        background: '#e8f5e8',
+                        border: '1px solid #27ae60',
+                        borderRadius: '4px',
+                        cursor: 'not-allowed',
+                        opacity: 0.8
+                      }}
+                    >
                       ✓ Installed
-                    </span>
+                    </button>
                   )}
                 </div>
               </div>

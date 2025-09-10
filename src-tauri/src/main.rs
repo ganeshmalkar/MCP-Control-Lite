@@ -268,6 +268,9 @@ async fn search_mcp_packages(query: String, filter: String, source: String) -> R
     
     println!("Searching for '{}' with filter '{}' from source '{}'", query, filter, source);
     
+    // Get list of installed servers first
+    let installed_servers = get_installed_servers().await.unwrap_or_default();
+    
     let mut all_results = Vec::new();
     
     // Search NPM directly if source includes npm
@@ -328,24 +331,7 @@ async fn search_mcp_packages(query: String, filter: String, source: String) -> R
             
             if let Some(caps) = server_pattern.captures(line) {
                 let name = caps.get(1).map_or("", |m| m.as_str()).trim();
-                let mut description = caps.get(2).map_or("", |m| m.as_str()).trim();
-                
-                // Fix generic PulseMCP descriptions by looking for better description in next lines
-                if description == "MCP server from PulseMCP registry" {
-                    // Look for a better description in the next few lines
-                    for j in (i+1)..(i+6).min(lines.len()) {
-                        let next_line = lines[j].trim();
-                        if !next_line.is_empty() && 
-                           !next_line.starts_with("🔗") && 
-                           !next_line.starts_with("🌐") && 
-                           !next_line.starts_with("💾") &&
-                           !next_line.starts_with("📋") &&
-                           next_line.len() > 20 {
-                            description = next_line;
-                            break;
-                        }
-                    }
-                }
+                let mut description = caps.get(2).map_or("", |m| m.as_str()).trim().to_string();
                 
                 // Look for URL and install command in next few lines
                 let mut repository = None;
@@ -361,6 +347,35 @@ async fn search_mcp_packages(query: String, filter: String, source: String) -> R
                     }
                     if let Some(install_caps) = install_pattern.captures(lines[j]) {
                         install_name = install_caps.get(1).unwrap().as_str().to_string();
+                    }
+                }
+                
+                // Fix generic PulseMCP descriptions by looking for better description in next lines
+                if description == "MCP server from PulseMCP registry" {
+                    // Try to get better description from PulseMCP API if it's a PulseMCP package
+                    if install_name.starts_with("@") && web_url.is_some() {
+                        if let Ok(better_desc) = get_pulsemcp_description(&install_name).await {
+                            if !better_desc.is_empty() {
+                                description = better_desc;
+                            }
+                        }
+                    }
+                    
+                    // If still generic, look for a better description in the next few lines
+                    if description == "MCP server from PulseMCP registry" {
+                        for j in (i+1)..(i+6).min(lines.len()) {
+                            let next_line = lines[j].trim();
+                            if !next_line.is_empty() && 
+                               !next_line.starts_with("🔗") && 
+                               !next_line.starts_with("🌐") && 
+                               !next_line.starts_with("💾") &&
+                               !next_line.starts_with("📋") &&
+                               !next_line.starts_with("✅") &&
+                               next_line.len() > 20 {
+                                description = next_line.to_string();
+                                break;
+                            }
+                        }
                     }
                 }
                 
@@ -388,13 +403,17 @@ async fn search_mcp_packages(query: String, filter: String, source: String) -> R
                     let mut keywords = Vec::new();
                     keywords.push(detected_source.to_string());
                     
-                    // Add meaningful keywords from description, filtering out generic terms
-                    for word in description.split_whitespace() {
+                    // Add meaningful keywords from description, filtering out generic terms and debug text
+                    let description_words: Vec<&str> = description.split_whitespace().collect();
+                    for word in description_words.iter().take(10) { // Only look at first 10 words to avoid debug text
                         let clean_word = word.to_lowercase().trim_matches(|c: char| !c.is_alphanumeric()).to_string();
                         if clean_word.len() > 3 && 
                            !keywords.contains(&clean_word) &&
-                           !["server", "from", "registry", "protocol", "context", "model"].contains(&clean_word.as_str()) {
+                           !["server", "from", "registry", "protocol", "context", "model", "found", "total", "matches", "across", "sources"].contains(&clean_word.as_str()) {
                             keywords.push(clean_word);
+                            if keywords.len() >= 5 { // Limit to 5 keywords total
+                                break;
+                            }
                         }
                     }
                     
@@ -407,6 +426,13 @@ async fn search_mcp_packages(query: String, filter: String, source: String) -> R
                     
                     let rating = Some(4.0 + (name.len() % 10) as f64 / 10.0);
                     
+                    // Check if this server is installed
+                    let is_installed = installed_servers.iter().any(|installed| 
+                        installed == &install_name || 
+                        installed.contains(&install_name) ||
+                        install_name.contains(installed)
+                    );
+                    
                     all_results.push(serde_json::json!({
                         "name": install_name,
                         "description": description,
@@ -416,7 +442,7 @@ async fn search_mcp_packages(query: String, filter: String, source: String) -> R
                         "repository": repository.or(web_url),
                         "downloads": downloads,
                         "rating": rating,
-                        "installed": false,
+                        "installed": is_installed,
                         "source": detected_source
                     }));
                 }
@@ -442,6 +468,48 @@ async fn search_mcp_packages(query: String, filter: String, source: String) -> R
     }
     
     Ok(all_results)
+}
+
+async fn get_pulsemcp_description(package_name: &str) -> Result<String, String> {
+    use std::process::Command;
+    
+    // Try to get package info from PulseMCP API
+    let clean_name = package_name.trim_start_matches('@');
+    let url = format!("https://api.pulsemcp.com/packages/{}", clean_name);
+    
+    let mut cmd = Command::new("curl");
+    cmd.arg("-s")
+       .arg("-H")
+       .arg("Accept: application/json")
+       .arg(&url);
+    
+    let output = cmd.output().map_err(|e| format!("Failed to fetch PulseMCP info: {}", e))?;
+    
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
+            if let Some(description) = json.get("description").and_then(|d| d.as_str()) {
+                if !description.is_empty() && description != "MCP server from PulseMCP registry" {
+                    return Ok(description.to_string());
+                }
+            }
+        }
+    }
+    
+    Err("No description found".to_string())
+}
+
+async fn get_installed_servers() -> Result<Vec<String>, String> {
+    let servers = get_servers().await?;
+    let mut installed = Vec::new();
+    
+    for server in servers {
+        if let Some(name) = server.get("name").and_then(|n| n.as_str()) {
+            installed.push(name.to_string());
+        }
+    }
+    
+    Ok(installed)
 }
 
 async fn search_github_repositories(query: &str) -> Result<Vec<serde_json::Value>, String> {
@@ -573,6 +641,9 @@ async fn search_npm_packages(query: &str, _filter: &str) -> Result<Vec<serde_jso
         let downloads = package.get("searchScore").and_then(|s| s.as_f64()).map(|s| (s * 10000.0) as u64);
         let rating = Some(4.0 + (name.len() % 10) as f64 / 10.0);
         
+        // Check if installed (this would need to be passed in or retrieved)
+        let is_installed = false; // TODO: Check against installed servers list
+        
         results.push(serde_json::json!({
             "name": name,
             "description": description,
@@ -582,7 +653,7 @@ async fn search_npm_packages(query: &str, _filter: &str) -> Result<Vec<serde_jso
             "repository": repository,
             "downloads": downloads,
             "rating": rating,
-            "installed": false,
+            "installed": is_installed,
             "source": "npm"
         }));
     }

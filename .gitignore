@@ -48,6 +48,7 @@ src-tauri/Cargo.lock
 # Project-specific
 releases/
 .taskmaster/
+MCP_Manager_Project_Plan.md
 
 # OS
 .DS_Store

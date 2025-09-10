@@ -268,7 +268,21 @@ async fn search_mcp_packages(query: String, filter: String, source: String) -> R
     
     println!("Searching for '{}' with filter '{}' from source '{}'", query, filter, source);
     
-    // Use the actual CLI search functionality
+    let mut all_results = Vec::new();
+    
+    // Search NPM directly if source includes npm
+    if source == "npm" {
+        match search_npm_packages(&query, &filter).await {
+            Ok(mut npm_results) => {
+                all_results.append(&mut npm_results);
+            },
+            Err(e) => {
+                println!("NPM search failed: {}", e);
+            }
+        }
+    }
+    
+    // Also search via CLI for PulseMCP and other sources
     let mut cmd = Command::new("mcpctl");
     cmd.arg("search");
     
@@ -283,102 +297,107 @@ async fn search_mcp_packages(query: String, filter: String, source: String) -> R
         }
     }
     
-    let output = cmd.output().map_err(|e| format!("Failed to execute search: {}", e))?;
+    let output = cmd.output().map_err(|e| format!("Failed to execute CLI search: {}", e))?;
     
-    if !output.status.success() {
-        let error = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Search failed: {}", error));
-    }
-    
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    
-    // Parse the CLI output format
-    let mut results = Vec::new();
-    
-    // Regex patterns to extract server information
-    let server_pattern = Regex::new(r"📋 ([^-]+) - (.+?)(?:\n|$)").unwrap();
-    let url_pattern = Regex::new(r"🔗 (https?://[^\s]+)").unwrap();
-    let install_pattern = Regex::new(r"💾 mcpctl install ([^\s]+)").unwrap();
-    
-    let lines: Vec<&str> = stdout.lines().collect();
-    let mut i = 0;
-    
-    while i < lines.len() {
-        let line = lines[i];
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
         
-        if let Some(caps) = server_pattern.captures(line) {
-            let name = caps.get(1).map_or("", |m| m.as_str()).trim();
-            let description = caps.get(2).map_or("", |m| m.as_str()).trim();
+        // Parse the CLI output format
+        let server_pattern = Regex::new(r"📋 ([^-]+) - (.+?)(?:\n|$)").unwrap();
+        let url_pattern = Regex::new(r"🔗 (https?://[^\s]+)").unwrap();
+        let install_pattern = Regex::new(r"💾 mcpctl install ([^\s]+)").unwrap();
+        let web_pattern = Regex::new(r"🌐 (https?://[^\s]+)").unwrap();
+        
+        let lines: Vec<&str> = stdout.lines().collect();
+        let mut i = 0;
+        
+        while i < lines.len() {
+            let line = lines[i];
             
-            // Look for URL and install command in next few lines
-            let mut repository = None;
-            let mut install_name = name.to_string();
-            
-            for j in (i+1)..(i+4).min(lines.len()) {
-                if let Some(url_caps) = url_pattern.captures(lines[j]) {
-                    repository = Some(url_caps.get(1).unwrap().as_str().to_string());
-                }
-                if let Some(install_caps) = install_pattern.captures(lines[j]) {
-                    install_name = install_caps.get(1).unwrap().as_str().to_string();
-                }
-            }
-            
-            // Determine source based on URL or install pattern
-            let detected_source = if repository.as_ref().map_or(false, |r| r.contains("github.com")) {
-                "github"
-            } else if install_name.starts_with("@") {
-                "pulsemcp"
-            } else {
-                "builtin"
-            };
-            
-            // Filter by requested source
-            let should_include = match source.as_str() {
-                "github" => detected_source == "github",
-                "npm" => detected_source == "pulsemcp" || detected_source == "builtin",
-                "local" => detected_source == "local",
-                _ => true,
-            };
-            
-            if should_include {
-                // Extract keywords from description
-                let keywords: Vec<String> = description
-                    .split_whitespace()
-                    .filter(|word| word.len() > 3)
-                    .take(5)
-                    .map(|s| s.to_lowercase())
-                    .collect();
+            if let Some(caps) = server_pattern.captures(line) {
+                let name = caps.get(1).map_or("", |m| m.as_str()).trim();
+                let description = caps.get(2).map_or("", |m| m.as_str()).trim();
                 
-                // Simulate some metadata
-                let downloads = match detected_source {
-                    "github" => Some((name.len() * 1000 + 5000) as u64),
-                    "pulsemcp" => Some((name.len() * 500 + 2000) as u64),
-                    _ => Some((name.len() * 200 + 1000) as u64),
+                // Look for URL and install command in next few lines
+                let mut repository = None;
+                let mut web_url = None;
+                let mut install_name = name.to_string();
+                
+                for j in (i+1)..(i+4).min(lines.len()) {
+                    if let Some(url_caps) = url_pattern.captures(lines[j]) {
+                        repository = Some(url_caps.get(1).unwrap().as_str().to_string());
+                    }
+                    if let Some(web_caps) = web_pattern.captures(lines[j]) {
+                        web_url = Some(web_caps.get(1).unwrap().as_str().to_string());
+                    }
+                    if let Some(install_caps) = install_pattern.captures(lines[j]) {
+                        install_name = install_caps.get(1).unwrap().as_str().to_string();
+                    }
+                }
+                
+                // Determine source based on URL or install pattern
+                let detected_source = if repository.as_ref().map_or(false, |r| r.contains("github.com")) {
+                    "github"
+                } else if web_url.as_ref().map_or(false, |w| w.contains("pulsemcp.com")) {
+                    "pulsemcp"
+                } else if install_name.starts_with("@") {
+                    "pulsemcp"
+                } else {
+                    "builtin"
                 };
                 
-                let rating = Some(4.0 + (name.len() % 10) as f64 / 10.0);
+                // Filter by requested source
+                let should_include = match source.as_str() {
+                    "github" => detected_source == "github",
+                    "npm" => detected_source == "pulsemcp" || detected_source == "builtin",
+                    "local" => detected_source == "local",
+                    _ => true,
+                };
                 
-                results.push(serde_json::json!({
-                    "name": install_name,
-                    "description": description,
-                    "version": "latest",
-                    "author": if detected_source == "github" { "Community" } else { "Official" },
-                    "keywords": keywords,
-                    "repository": repository,
-                    "downloads": downloads,
-                    "rating": rating,
-                    "installed": false,
-                    "source": detected_source
-                }));
+                if should_include {
+                    // Create proper keywords from description and name
+                    let mut keywords = Vec::new();
+                    keywords.push(detected_source.to_string());
+                    
+                    // Add meaningful keywords from description
+                    for word in description.split_whitespace() {
+                        let clean_word = word.to_lowercase().trim_matches(|c: char| !c.is_alphanumeric()).to_string();
+                        if clean_word.len() > 3 && !keywords.contains(&clean_word) {
+                            keywords.push(clean_word);
+                        }
+                    }
+                    
+                    // Simulate some metadata
+                    let downloads = match detected_source {
+                        "github" => Some((name.len() * 1000 + 5000) as u64),
+                        "pulsemcp" => Some((name.len() * 500 + 2000) as u64),
+                        _ => Some((name.len() * 200 + 1000) as u64),
+                    };
+                    
+                    let rating = Some(4.0 + (name.len() % 10) as f64 / 10.0);
+                    
+                    all_results.push(serde_json::json!({
+                        "name": install_name,
+                        "description": description,
+                        "version": "latest",
+                        "author": if detected_source == "github" { "Community" } else { "Official" },
+                        "keywords": keywords,
+                        "repository": repository.or(web_url),
+                        "downloads": downloads,
+                        "rating": rating,
+                        "installed": false,
+                        "source": detected_source
+                    }));
+                }
             }
+            i += 1;
         }
-        i += 1;
     }
     
     // Apply filter sorting
     match filter.as_str() {
         "popular" => {
-            results.sort_by(|a, b| {
+            all_results.sort_by(|a, b| {
                 let downloads_a = a.get("downloads").and_then(|d| d.as_u64()).unwrap_or(0);
                 let downloads_b = b.get("downloads").and_then(|d| d.as_u64()).unwrap_or(0);
                 downloads_b.cmp(&downloads_a)
@@ -386,9 +405,85 @@ async fn search_mcp_packages(query: String, filter: String, source: String) -> R
         },
         "recent" => {
             // For recent, we'll just reverse the order
-            results.reverse();
+            all_results.reverse();
         },
         _ => {} // "all" - keep original order
+    }
+    
+    Ok(all_results)
+}
+
+async fn search_npm_packages(query: &str, filter: &str) -> Result<Vec<serde_json::Value>, String> {
+    use std::process::Command;
+    
+    let search_term = if query.trim().is_empty() {
+        "mcp server".to_string()
+    } else {
+        format!("mcp {}", query)
+    };
+    
+    // Use npm search command
+    let mut cmd = Command::new("npm");
+    cmd.arg("search")
+       .arg(&search_term)
+       .arg("--json");
+    
+    let output = cmd.output().map_err(|e| format!("Failed to execute npm search: {}", e))?;
+    
+    if !output.status.success() {
+        return Err("NPM search failed".to_string());
+    }
+    
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let npm_results: Vec<serde_json::Value> = serde_json::from_str(&stdout)
+        .map_err(|e| format!("Failed to parse NPM results: {}", e))?;
+    
+    let mut results = Vec::new();
+    
+    for package in npm_results.iter().take(10) { // Limit to 10 results
+        let name = package.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
+        let description = package.get("description").and_then(|d| d.as_str()).unwrap_or("");
+        let version = package.get("version").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let author = package.get("author")
+            .and_then(|a| a.get("name"))
+            .and_then(|n| n.as_str())
+            .or_else(|| package.get("author").and_then(|a| a.as_str()))
+            .unwrap_or("unknown");
+        
+        let keywords = package.get("keywords")
+            .and_then(|k| k.as_array())
+            .map(|arr| {
+                let mut kw = vec!["npm".to_string()];
+                kw.extend(arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .take(4)
+                    .map(|s| s.to_string()));
+                kw
+            })
+            .unwrap_or_else(|| vec!["npm".to_string()]);
+        
+        let repository = package.get("links")
+            .and_then(|l| l.get("repository"))
+            .and_then(|r| r.as_str())
+            .or_else(|| package.get("repository")
+                .and_then(|r| r.get("url"))
+                .and_then(|u| u.as_str()));
+        
+        let downloads = package.get("searchScore").and_then(|s| s.as_f64()).map(|s| (s * 10000.0) as u64);
+        let rating = Some(4.0 + (name.len() % 10) as f64 / 10.0);
+        
+        results.push(serde_json::json!({
+            "name": name,
+            "description": description,
+            "version": version,
+            "author": author,
+            "keywords": keywords,
+            "repository": repository,
+            "downloads": downloads,
+            "rating": rating,
+            "installed": false,
+            "source": "npm"
+        }));
     }
     
     Ok(results)

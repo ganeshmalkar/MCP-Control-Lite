@@ -249,14 +249,16 @@ export default function Discover() {
                   
                   {pkg.keywords.length > 0 && (
                     <div style={{ marginTop: '8px', display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                      {pkg.keywords.slice(0, 3).map(keyword => (
+                      {pkg.keywords.slice(0, 5).map(keyword => (
                         <span key={keyword} style={{
                           fontSize: '11px',
-                          background: 'var(--bg-primary)',
-                          color: 'var(--text-secondary)',
+                          background: keyword === 'npm' ? '#cb3837' : 
+                                    keyword === 'github' ? '#333' :
+                                    keyword === 'pulsemcp' ? '#3498db' : 'var(--bg-primary)',
+                          color: ['npm', 'github', 'pulsemcp'].includes(keyword) ? 'white' : 'var(--text-secondary)',
                           padding: '2px 6px',
                           borderRadius: '3px',
-                          border: '1px solid var(--border-color)'
+                          border: ['npm', 'github', 'pulsemcp'].includes(keyword) ? 'none' : '1px solid var(--border-color)'
                         }}>
                           {keyword}
                         </span>
@@ -268,18 +270,29 @@ export default function Discover() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   {pkg.repository && (
                     <button
-                      onClick={() => window.open(pkg.repository, '_blank')}
+                      onClick={() => {
+                        if (pkg.repository) {
+                          window.open(pkg.repository, '_blank');
+                        }
+                      }}
                       style={{
                         background: 'none',
                         border: '1px solid var(--border-color)',
                         borderRadius: '4px',
                         padding: '6px',
                         cursor: 'pointer',
-                        color: 'var(--text-secondary)'
+                        color: 'var(--text-secondary)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
                       }}
-                      title="View repository"
+                      title={`View ${pkg.repository.includes('github.com') ? 'GitHub' : pkg.repository.includes('pulsemcp.com') ? 'PulseMCP' : 'repository'}`}
                     >
                       <ExternalLink size={14} />
+                      <span style={{ fontSize: '12px' }}>
+                        {pkg.repository.includes('github.com') ? 'GitHub' : 
+                         pkg.repository.includes('pulsemcp.com') ? 'PulseMCP' : 'Repo'}
+                      </span>
                     </button>
                   )}
                   

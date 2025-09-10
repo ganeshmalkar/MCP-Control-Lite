@@ -51,6 +51,19 @@ export default function Logs() {
 
   const loadLogs = async () => {
     try {
+      // Check if logging is enabled
+      const settings = await invoke<any>('get_settings');
+      if (settings && settings.enableLogs === false) {
+        setLogs([{
+          id: 'disabled-' + Date.now(),
+          timestamp: new Date().toISOString(),
+          level: 'info',
+          category: 'system',
+          message: 'Logging is disabled in settings. Enable logging to see system events.'
+        }]);
+        return;
+      }
+      
       const logsData = await invoke<LogEntry[]>('get_logs');
       setLogs(logsData);
     } catch (error) {

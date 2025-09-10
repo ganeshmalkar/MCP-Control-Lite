@@ -403,16 +403,23 @@ async fn search_mcp_packages(query: String, filter: String, source: String) -> R
                     let mut keywords = Vec::new();
                     keywords.push(detected_source.to_string());
                     
-                    // Add meaningful keywords from description, filtering out generic terms and debug text
-                    let description_words: Vec<&str> = description.split_whitespace().collect();
-                    for word in description_words.iter().take(10) { // Only look at first 10 words to avoid debug text
-                        let clean_word = word.to_lowercase().trim_matches(|c: char| !c.is_alphanumeric()).to_string();
-                        if clean_word.len() > 3 && 
-                           !keywords.contains(&clean_word) &&
-                           !["server", "from", "registry", "protocol", "context", "model", "found", "total", "matches", "across", "sources"].contains(&clean_word.as_str()) {
-                            keywords.push(clean_word);
-                            if keywords.len() >= 5 { // Limit to 5 keywords total
-                                break;
+                    // Only add keywords from description if it doesn't look like debug output
+                    if !description.to_lowercase().contains("found") && 
+                       !description.to_lowercase().contains("matches") &&
+                       !description.to_lowercase().contains("total") &&
+                       description.len() < 200 { // Avoid long debug strings
+                        
+                        // Add meaningful keywords from description
+                        let description_words: Vec<&str> = description.split_whitespace().collect();
+                        for word in description_words.iter().take(5) { // Only first 5 words
+                            let clean_word = word.to_lowercase().trim_matches(|c: char| !c.is_alphanumeric()).to_string();
+                            if clean_word.len() > 2 && 
+                               !keywords.contains(&clean_word) &&
+                               !["the", "and", "for", "with", "mcp"].contains(&clean_word.as_str()) {
+                                keywords.push(clean_word);
+                                if keywords.len() >= 4 { // Limit to 4 keywords total (including source)
+                                    break;
+                                }
                             }
                         }
                     }
@@ -473,24 +480,42 @@ async fn search_mcp_packages(query: String, filter: String, source: String) -> R
 async fn get_pulsemcp_description(package_name: &str) -> Result<String, String> {
     use std::process::Command;
     
-    // Try to get package info from PulseMCP API
+    // Try multiple approaches to get better PulseMCP descriptions
+    
+    // First try: Direct package info from PulseMCP website
     let clean_name = package_name.trim_start_matches('@');
-    let url = format!("https://api.pulsemcp.com/packages/{}", clean_name);
+    let parts: Vec<&str> = clean_name.split('/').collect();
     
-    let mut cmd = Command::new("curl");
-    cmd.arg("-s")
-       .arg("-H")
-       .arg("Accept: application/json")
-       .arg(&url);
-    
-    let output = cmd.output().map_err(|e| format!("Failed to fetch PulseMCP info: {}", e))?;
-    
-    if output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
-            if let Some(description) = json.get("description").and_then(|d| d.as_str()) {
-                if !description.is_empty() && description != "MCP server from PulseMCP registry" {
-                    return Ok(description.to_string());
+    if parts.len() == 2 {
+        let author = parts[0];
+        let package = parts[1];
+        
+        // Try to scrape the PulseMCP page for description
+        let url = format!("https://www.pulsemcp.com/servers/{}-{}", author, package);
+        
+        let mut cmd = Command::new("curl");
+        cmd.arg("-s")
+           .arg("-L") // Follow redirects
+           .arg(&url);
+        
+        if let Ok(output) = cmd.output() {
+            if output.status.success() {
+                let html = String::from_utf8_lossy(&output.stdout);
+                
+                // Look for description in HTML meta tags or content
+                if let Some(desc_start) = html.find("description") {
+                    let desc_section = &html[desc_start..desc_start.min(html.len()).min(desc_start + 500)];
+                    
+                    // Try to extract description from various HTML patterns
+                    if let Some(content_start) = desc_section.find("content=\"") {
+                        let content_start = content_start + 9;
+                        if let Some(content_end) = desc_section[content_start..].find("\"") {
+                            let description = &desc_section[content_start..content_start + content_end];
+                            if description.len() > 20 && !description.contains("MCP server from PulseMCP registry") {
+                                return Ok(description.to_string());
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -665,31 +690,37 @@ async fn search_npm_packages(query: &str, _filter: &str) -> Result<Vec<serde_jso
 async fn install_mcp_package(package_name: String) -> Result<(), String> {
     use std::process::Command;
     
-    println!("Installing MCP package: {}", package_name);
-    
-    // Log the installation attempt
-    log::info!("Starting installation of MCP package: {}", package_name);
+    let install_msg = format!("🔧 Installing MCP package: {}", package_name);
+    println!("{}", install_msg);
+    log::info!("{}", install_msg);
     
     // Use the actual CLI install command
     let mut cmd = Command::new("mcpctl");
     cmd.arg("install").arg(&package_name);
     
     let output = cmd.output().map_err(|e| {
-        let error_msg = format!("Failed to execute install: {}", e);
+        let error_msg = format!("❌ Failed to execute install command for {}: {}", package_name, e);
         log::error!("{}", error_msg);
         error_msg
     })?;
     
     if !output.status.success() {
         let error = String::from_utf8_lossy(&output.stderr);
-        let error_msg = format!("Installation failed: {}", error);
+        let error_msg = format!("❌ Installation failed for {}: {}", package_name, error);
         log::error!("{}", error_msg);
         return Err(error_msg);
     }
     
-    let success_msg = format!("Successfully installed: {}", package_name);
+    let success_msg = format!("✅ Successfully installed MCP package: {}", package_name);
     println!("{}", success_msg);
     log::info!("{}", success_msg);
+    
+    // Also log the installation output for debugging
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if !stdout.trim().is_empty() {
+        log::info!("Installation output: {}", stdout.trim());
+    }
+    
     Ok(())
 }
 

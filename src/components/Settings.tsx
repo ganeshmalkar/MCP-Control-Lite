@@ -11,6 +11,7 @@ interface UserSettings {
   backupLocation: string;
   backupFrequency: 'daily' | 'weekly' | 'monthly';
   logLevel: 'error' | 'warn' | 'info' | 'debug';
+  enableLogs: boolean;
   developerMode: boolean;
   enabledApps: {
     'Claude Desktop': boolean;
@@ -31,6 +32,7 @@ const defaultSettings: UserSettings = {
   backupLocation: '',
   backupFrequency: 'weekly',
   logLevel: 'info',
+  enableLogs: true,
   developerMode: false,
   enabledApps: {
     'Claude Desktop': true,
@@ -211,6 +213,15 @@ export default function Settings({ onSettingsSaved }: SettingsProps) {
                 onChange={(e) => setSettings({ ...settings, minimizeToTray: e.target.checked })}
               />
               Minimize to system tray
+            </label>
+            
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
+              <input
+                type="checkbox"
+                checked={settings.enableLogs}
+                onChange={(e) => setSettings({ ...settings, enableLogs: e.target.checked })}
+              />
+              Enable logging
             </label>
             
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)' }}>

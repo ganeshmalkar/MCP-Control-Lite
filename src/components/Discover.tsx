@@ -75,7 +75,9 @@ export default function Discover({ onInstallComplete }: DiscoverProps) {
       
       // Refresh main app data if callback provided
       if (onInstallComplete) {
-        onInstallComplete();
+        setTimeout(() => {
+          onInstallComplete();
+        }, 1000); // Give installation time to complete
       }
     } catch (error) {
       console.error('Installation failed:', error);

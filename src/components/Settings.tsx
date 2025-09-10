@@ -213,13 +213,17 @@ export default function Settings({ onSettingsSaved }: SettingsProps) {
               Minimize to system tray
             </label>
             
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)' }}>
               <input
                 type="checkbox"
-                checked={settings.checkUpdates}
-                onChange={(e) => setSettings({ ...settings, checkUpdates: e.target.checked })}
+                checked={false}
+                disabled={true}
+                style={{ opacity: 0.5 }}
               />
-              Check for updates automatically
+              <span style={{ textDecoration: 'line-through' }}>Check for updates automatically</span>
+              <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+                (Coming Soon)
+              </span>
             </label>
           </div>
         </div>

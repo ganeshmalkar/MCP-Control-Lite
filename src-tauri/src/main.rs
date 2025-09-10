@@ -282,6 +282,18 @@ async fn search_mcp_packages(query: String, filter: String, source: String) -> R
         }
     }
     
+    // Search GitHub directly if source is github
+    if source == "github" {
+        match search_github_repositories(&query).await {
+            Ok(mut github_results) => {
+                all_results.append(&mut github_results);
+            },
+            Err(e) => {
+                println!("GitHub search failed: {}", e);
+            }
+        }
+    }
+    
     // Also search via CLI for PulseMCP and other sources
     let mut cmd = Command::new("mcpctl");
     cmd.arg("search");
@@ -316,7 +328,24 @@ async fn search_mcp_packages(query: String, filter: String, source: String) -> R
             
             if let Some(caps) = server_pattern.captures(line) {
                 let name = caps.get(1).map_or("", |m| m.as_str()).trim();
-                let description = caps.get(2).map_or("", |m| m.as_str()).trim();
+                let mut description = caps.get(2).map_or("", |m| m.as_str()).trim();
+                
+                // Fix generic PulseMCP descriptions by looking for better description in next lines
+                if description == "MCP server from PulseMCP registry" {
+                    // Look for a better description in the next few lines
+                    for j in (i+1)..(i+6).min(lines.len()) {
+                        let next_line = lines[j].trim();
+                        if !next_line.is_empty() && 
+                           !next_line.starts_with("🔗") && 
+                           !next_line.starts_with("🌐") && 
+                           !next_line.starts_with("💾") &&
+                           !next_line.starts_with("📋") &&
+                           next_line.len() > 20 {
+                            description = next_line;
+                            break;
+                        }
+                    }
+                }
                 
                 // Look for URL and install command in next few lines
                 let mut repository = None;
@@ -415,7 +444,76 @@ async fn search_mcp_packages(query: String, filter: String, source: String) -> R
     Ok(all_results)
 }
 
-async fn search_npm_packages(query: &str, filter: &str) -> Result<Vec<serde_json::Value>, String> {
+async fn search_github_repositories(query: &str) -> Result<Vec<serde_json::Value>, String> {
+    use std::process::Command;
+    
+    let search_term = if query.trim().is_empty() {
+        "mcp server".to_string()
+    } else {
+        format!("mcp {}", query)
+    };
+    
+    // Use curl to search GitHub API
+    let mut cmd = Command::new("curl");
+    cmd.arg("-s")
+       .arg("-H")
+       .arg("Accept: application/vnd.github.v3+json")
+       .arg(&format!("https://api.github.com/search/repositories?q={}&sort=stars&order=desc&per_page=10", 
+                     urlencoding::encode(&search_term)));
+    
+    let output = cmd.output().map_err(|e| format!("Failed to execute GitHub search: {}", e))?;
+    
+    if !output.status.success() {
+        return Err("GitHub search failed".to_string());
+    }
+    
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let github_response: serde_json::Value = serde_json::from_str(&stdout)
+        .map_err(|e| format!("Failed to parse GitHub results: {}", e))?;
+    
+    let mut results = Vec::new();
+    
+    if let Some(items) = github_response.get("items").and_then(|i| i.as_array()) {
+        for repo in items.iter().take(10) {
+            let name = repo.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
+            let full_name = repo.get("full_name").and_then(|n| n.as_str()).unwrap_or(name);
+            let description = repo.get("description").and_then(|d| d.as_str()).unwrap_or("");
+            let owner = repo.get("owner")
+                .and_then(|o| o.get("login"))
+                .and_then(|l| l.as_str())
+                .unwrap_or("unknown");
+            let html_url = repo.get("html_url").and_then(|u| u.as_str()).unwrap_or("");
+            let stars = repo.get("stargazers_count").and_then(|s| s.as_u64()).unwrap_or(0);
+            
+            // Extract keywords from topics and description
+            let mut keywords = vec!["github".to_string()];
+            if let Some(topics) = repo.get("topics").and_then(|t| t.as_array()) {
+                keywords.extend(topics.iter()
+                    .filter_map(|t| t.as_str())
+                    .filter(|s| !["server", "from", "registry", "protocol", "context", "model"].contains(s))
+                    .take(4)
+                    .map(|s| s.to_string()));
+            }
+            
+            results.push(serde_json::json!({
+                "name": full_name,
+                "description": description,
+                "version": "latest",
+                "author": owner,
+                "keywords": keywords,
+                "repository": html_url,
+                "downloads": stars, // Use stars as download metric
+                "rating": Some(4.0 + (stars % 10) as f64 / 10.0),
+                "installed": false,
+                "source": "github"
+            }));
+        }
+    }
+    
+    Ok(results)
+}
+
+async fn search_npm_packages(query: &str, _filter: &str) -> Result<Vec<serde_json::Value>, String> {
     use std::process::Command;
     
     let search_term = if query.trim().is_empty() {
@@ -498,18 +596,29 @@ async fn install_mcp_package(package_name: String) -> Result<(), String> {
     
     println!("Installing MCP package: {}", package_name);
     
+    // Log the installation attempt
+    log::info!("Starting installation of MCP package: {}", package_name);
+    
     // Use the actual CLI install command
     let mut cmd = Command::new("mcpctl");
     cmd.arg("install").arg(&package_name);
     
-    let output = cmd.output().map_err(|e| format!("Failed to execute install: {}", e))?;
+    let output = cmd.output().map_err(|e| {
+        let error_msg = format!("Failed to execute install: {}", e);
+        log::error!("{}", error_msg);
+        error_msg
+    })?;
     
     if !output.status.success() {
         let error = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Installation failed: {}", error));
+        let error_msg = format!("Installation failed: {}", error);
+        log::error!("{}", error_msg);
+        return Err(error_msg);
     }
     
-    println!("Successfully installed: {}", package_name);
+    let success_msg = format!("Successfully installed: {}", package_name);
+    println!("{}", success_msg);
+    log::info!("{}", success_msg);
     Ok(())
 }
 

@@ -2,7 +2,7 @@
 
 **The Ultimate Model Context Protocol Server Management Tool**
 
-[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/Chykalophia/MCP-Control-Lite/releases)
+[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](https://github.com/Chykalophia/MCP-Control-Lite/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey.svg)](#installation)
 

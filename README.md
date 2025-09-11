@@ -139,6 +139,14 @@ Our team has helped businesses achieve **measurable 3x growth** through strategi
 
 **Ready to 3x your business growth?** [**Contact us today**](https://chykalophia.com) to discuss your custom AI solution needs.
 
+## 👨‍💻 Core Contributor
+
+**Peter Krzyzek** - Lead Developer & Fractional CTO  
+🌐 Website: [piotrkrzyzek.com](https://piotrkrzyzek.com)  
+💼 LinkedIn: [linkedin.com/in/gopeter](https://linkedin.com/in/gopeter)  
+
+**Need a Fractional CTO?** Peter specializes in scaling engineering teams and architecting robust systems. Available for fractional CTO engagements through his website.
+
 ---
 
 ## 🔗 Links

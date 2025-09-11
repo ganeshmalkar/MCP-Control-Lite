@@ -222,26 +222,6 @@ function App() {
     </div>
   );
 
-  const handleDeleteServer = async (serverName: string) => {
-    console.log('Delete button clicked for server:', serverName);
-    
-    if (!confirm(`Are you sure you want to delete the server "${serverName}"? This will remove it from all MCP client configurations.`)) {
-      console.log('Delete cancelled by user');
-      return;
-    }
-    
-    console.log('Attempting to delete server:', serverName);
-    
-    try {
-      await invoke('delete_server', { serverName });
-      console.log('Delete successful, refreshing data');
-      await loadData(); // Refresh the data
-    } catch (error) {
-      console.error('Failed to delete server:', error);
-      alert('Failed to delete server. Please try again.');
-    }
-  };
-
   const handleToggleAllApps = async (serverName: string, enabled: boolean) => {
     try {
       const server = consolidatedServers.find(s => s.name === serverName);
@@ -268,12 +248,6 @@ function App() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <h2>MCP Servers</h2>
         <div style={{ display: 'flex', gap: '12px' }}>
-          <button 
-            onClick={() => alert('TEST BUTTON WORKS!')}
-            style={{ background: 'blue', color: 'white', padding: '8px' }}
-          >
-            TEST
-          </button>
           <button 
             className="btn btn-secondary" 
             onClick={() => setShowingManualAdd(true)}
@@ -328,11 +302,13 @@ function App() {
                   <div className={`status-indicator ${someEnabled ? 'status-enabled' : 'status-disabled'}`}></div>
                   
                   <button
-                    onClick={() => setSelectedServer({
-                      id: `${server.name}-consolidated`,
-                      name: server.name,
-                      application: server.applications[0]?.name || ''
-                    })}
+                    onClick={() => {
+                      setSelectedServer({
+                        id: `${server.name}-consolidated`,
+                        name: server.name,
+                        application: server.applications[0]?.name || ''
+                      });
+                    }}
                     style={{
                       background: 'none',
                       border: 'none',
@@ -343,24 +319,6 @@ function App() {
                     title="Configure server"
                   >
                     <Edit size={16} />
-                  </button>
-                  
-                  <button
-                    onClick={() => {
-                      alert('Delete button clicked!');
-                      handleDeleteServer(server.name);
-                    }}
-                    style={{
-                      background: 'red',
-                      border: '2px solid black',
-                      cursor: 'pointer',
-                      color: 'white',
-                      padding: '8px',
-                      fontSize: '12px'
-                    }}
-                    title="Delete server"
-                  >
-                    DELETE
                   </button>
                   
                   <div 

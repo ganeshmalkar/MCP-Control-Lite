@@ -262,8 +262,12 @@ async fn get_server_config(server_id: String, _application: String) -> Result<se
     let settings = get_settings().await.unwrap_or_else(|_| serde_json::json!({}));
     let enabled_apps = settings.get("enabledApps").and_then(|e| e.as_object());
     
-    // Clean up server_id - remove any suffix after dash
-    let clean_server_id = server_id.split('-').next().unwrap_or(&server_id);
+    // Clean up server_id - remove any suffix after dash, specifically -consolidated
+    let clean_server_id = if server_id.ends_with("-consolidated") {
+        server_id.trim_end_matches("-consolidated")
+    } else {
+        server_id.split('-').next().unwrap_or(&server_id)
+    };
     
     // Find the server config in any detected application
     for result in &results {
@@ -272,9 +276,14 @@ async fn get_server_config(server_id: String, _application: String) -> Result<se
                 if let Ok(content) = tokio::fs::read_to_string(config_path).await {
                     if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
                         if let Some(mcp_servers) = config.get("mcpServers").and_then(|s| s.as_object()) {
-                            // Try exact match first, then clean match
+                            // Try multiple variations of the server name
                             let server_config = mcp_servers.get(&server_id)
-                                .or_else(|| mcp_servers.get(clean_server_id));
+                                .or_else(|| mcp_servers.get(clean_server_id))
+                                .or_else(|| {
+                                    // Try without any dashes/underscores normalization
+                                    let normalized_id = server_id.replace("-consolidated", "");
+                                    mcp_servers.get(&normalized_id)
+                                });
                             
                             if let Some(server_config) = server_config {
                                 // Found the server config, extract real data
@@ -282,25 +291,50 @@ async fn get_server_config(server_id: String, _application: String) -> Result<se
                                 let args = server_config.get("args").and_then(|a| a.as_array()).cloned().unwrap_or_default();
                                 let env = server_config.get("env").and_then(|e| e.as_object()).cloned().unwrap_or_default();
                                 let disabled = server_config.get("disabled").and_then(|d| d.as_bool()).unwrap_or(false);
+                                let default_description = format!("MCP Server: {}", clean_server_id);
+                                let description = server_config.get("description").and_then(|d| d.as_str()).unwrap_or(&default_description);
                                 
-                                // Get available applications (only enabled ones)
+                                // Get all applications with their enabled status and configuration status
                                 let mut available_apps = Vec::new();
                                 for app_result in &results {
-                                    if let Some(enabled_apps) = enabled_apps {
-                                        if let Some(enabled) = enabled_apps.get(&app_result.profile.name).and_then(|e| e.as_bool()) {
-                                            if enabled {
-                                                available_apps.push(serde_json::json!({
-                                                    "name": app_result.profile.name,
-                                                    "detected": app_result.detected
-                                                }));
+                                    let is_enabled = if let Some(enabled_apps) = enabled_apps {
+                                        enabled_apps.get(&app_result.profile.name)
+                                            .and_then(|e| e.as_bool())
+                                            .unwrap_or(false)
+                                    } else {
+                                        false
+                                    };
+                                    
+                                    // Check if this server is configured in this application
+                                    let is_configured = if let Some(config_path) = &app_result.found_paths.config_file {
+                                        if let Ok(content) = tokio::fs::read_to_string(config_path).await {
+                                            if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
+                                                if let Some(mcp_servers) = config.get("mcpServers").and_then(|s| s.as_object()) {
+                                                    mcp_servers.contains_key(&server_id) || mcp_servers.contains_key(clean_server_id)
+                                                } else {
+                                                    false
+                                                }
+                                            } else {
+                                                false
                                             }
+                                        } else {
+                                            false
                                         }
-                                    }
+                                    } else {
+                                        false
+                                    };
+                                    
+                                    available_apps.push(serde_json::json!({
+                                        "name": app_result.profile.name,
+                                        "detected": app_result.detected,
+                                        "enabled": is_enabled,
+                                        "configured": is_configured
+                                    }));
                                 }
                                 
                                 return Ok(serde_json::json!({
                                     "name": clean_server_id,
-                                    "description": format!("MCP Server: {}", clean_server_id),
+                                    "description": description,
                                     "enabled": !disabled,
                                     "command": command,
                                     "args": args,
@@ -616,12 +650,10 @@ async fn install_mcp_package(package_name: String) -> Result<(), String> {
     use std::env;
     
     let install_msg = format!("🔧 Installing MCP package: {}", package_name);
-    println!("{}", install_msg);
     log::info!("{}", install_msg);
     
     // Set working directory to user's home directory
     let home_dir = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    println!("Using working directory: {}", home_dir);
     
     // Create a comprehensive shell command that sources environment
     let shell_cmd = format!(
@@ -639,36 +671,26 @@ async fn install_mcp_package(package_name: String) -> Result<(), String> {
         cmd
     };
     
-    println!("Running npm install for: {} in directory: {}", package_name, home_dir);
-    
     let output = cmd.output().map_err(|e| {
         let error_msg = format!("❌ Failed to execute install command for {}: {}", package_name, e);
-        println!("{}", error_msg);
         log::error!("{}", error_msg);
         error_msg
     })?;
     
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let _stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    
-    println!("Exit status: {}", output.status);
-    println!("STDOUT: {}", stdout);
-    println!("STDERR: {}", stderr);
     
     if !output.status.success() {
         let error_msg = format!("❌ Installation failed for {}: {}", package_name, stderr);
-        println!("{}", error_msg);
         log::error!("{}", error_msg);
         return Err(error_msg);
     }
     
     let success_msg = format!("✅ Successfully installed MCP package: {}", package_name);
-    println!("{}", success_msg);
     log::info!("{}", success_msg);
     
     // Now add the server to Amazon Q Developer configuration
-    if let Err(e) = add_server_to_config(&package_name).await {
-        println!("⚠️ Warning: Failed to add server to configuration: {}", e);
+    if let Err(_e) = add_server_to_config(&package_name).await {
         // Don't fail the entire operation, just warn
     }
     
@@ -676,8 +698,6 @@ async fn install_mcp_package(package_name: String) -> Result<(), String> {
 }
 
 async fn add_server_to_config(package_name: &str) -> Result<(), String> {
-    use std::path::PathBuf;
-    
     // Find Amazon Q Developer config
     let mut detector = ApplicationDetector::new().map_err(|e| e.to_string())?;
     let results = detector.detect_all_applications().await.map_err(|e| e.to_string())?;
@@ -685,7 +705,6 @@ async fn add_server_to_config(package_name: &str) -> Result<(), String> {
     for result in &results {
         if result.profile.name == "Amazon Q Developer" && result.detected {
             if let Some(config_path) = &result.found_paths.config_file {
-                println!("Adding {} to Amazon Q Developer config at: {:?}", package_name, config_path);
                 
                 // Read existing config
                 let content = tokio::fs::read_to_string(config_path).await
@@ -719,7 +738,6 @@ async fn add_server_to_config(package_name: &str) -> Result<(), String> {
                 tokio::fs::write(config_path, updated_content).await
                     .map_err(|e| format!("Failed to write config: {}", e))?;
                 
-                println!("✅ Added {} as '{}' to Amazon Q Developer configuration", package_name, server_name);
                 return Ok(());
             }
         }
@@ -765,7 +783,6 @@ async fn get_installed_package_names() -> Result<std::collections::HashSet<Strin
 
 #[tauri::command]
 async fn delete_server(server_name: String) -> Result<(), String> {
-    println!("🗑️ Deleting server: {}", server_name);
     log::info!("Deleting server: {}", server_name);
     
     // Get all detected applications
@@ -777,13 +794,11 @@ async fn delete_server(server_name: String) -> Result<(), String> {
     for result in &results {
         if result.detected {
             if let Some(config_path) = &result.found_paths.config_file {
-                println!("Checking config: {:?}", config_path);
                 
                 // Read existing config
                 if let Ok(content) = tokio::fs::read_to_string(config_path).await {
                     if let Ok(mut config) = serde_json::from_str::<serde_json::Value>(&content) {
                         if let Some(mcp_servers) = config.get_mut("mcpServers").and_then(|s| s.as_object_mut()) {
-                            println!("Found mcpServers with keys: {:?}", mcp_servers.keys().collect::<Vec<_>>());
                             
                             // Remove servers with matching name (handle variations)
                             let keys_to_remove: Vec<String> = mcp_servers.keys()
@@ -794,18 +809,15 @@ async fn delete_server(server_name: String) -> Result<(), String> {
                                         key.to_lowercase() == server_name.to_lowercase();
                                     
                                     if matches {
-                                        println!("Found matching key: {} for server: {}", key, server_name);
+                                        // Found matching key
                                     }
                                     matches
                                 })
                                 .cloned()
                                 .collect();
                             
-                            println!("Keys to remove: {:?}", keys_to_remove);
-                            
                             for key in &keys_to_remove {
                                 mcp_servers.remove(key);
-                                println!("Removed '{}' from {}", key, result.profile.name);
                             }
                             
                             if !keys_to_remove.is_empty() {
@@ -819,13 +831,13 @@ async fn delete_server(server_name: String) -> Result<(), String> {
                                 deleted_from_apps.push(result.profile.name.clone());
                             }
                         } else {
-                            println!("No mcpServers found in config");
+                            // No mcpServers found in config
                         }
                     } else {
-                        println!("Failed to parse config as JSON");
+                        // Failed to parse config as JSON
                     }
                 } else {
-                    println!("Failed to read config file");
+                    // Failed to read config file
                 }
             }
         }
@@ -833,12 +845,10 @@ async fn delete_server(server_name: String) -> Result<(), String> {
     
     if deleted_from_apps.is_empty() {
         let error_msg = format!("Server '{}' not found in any MCP configurations", server_name);
-        println!("❌ {}", error_msg);
         return Err(error_msg);
     }
     
     let success_msg = format!("✅ Successfully deleted '{}' from: {}", server_name, deleted_from_apps.join(", "));
-    println!("{}", success_msg);
     log::info!("{}", success_msg);
     
     Ok(())
@@ -849,7 +859,6 @@ async fn create_server(application: String, config: serde_json::Value) -> Result
     let server_name = config.get("name").and_then(|n| n.as_str())
         .ok_or("Server name is required")?;
     
-    println!("🆕 Creating new server: {} for {}", server_name, application);
     log::info!("Creating new server: {} for {}", server_name, application);
     
     // Find the application config
@@ -891,7 +900,6 @@ async fn create_server(application: String, config: serde_json::Value) -> Result
                 tokio::fs::write(config_path, updated_content).await
                     .map_err(|e| format!("Failed to write config: {}", e))?;
                 
-                println!("✅ Created server '{}' in {}", server_name, application);
                 return Ok(());
             }
         }
@@ -903,23 +911,62 @@ async fn create_server(application: String, config: serde_json::Value) -> Result
 #[tauri::command]
 async fn show_notification(title: String, body: String) -> Result<(), String> {
     // For now, just log the notification - can be enhanced with actual system notifications
-    println!("Notification: {} - {}", title, body);
+    log::info!("Notification: {} - {}", title, body);
     Ok(())
 }
 
 #[tauri::command]
 async fn sync_application(app_name: String) -> Result<(), String> {
     // Simulate sync operation
-    println!("Syncing application: {}", app_name);
+    log::info!("Syncing application: {}", app_name);
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     Ok(())
 }
 
+
 #[tauri::command]
 async fn save_server_config(server_id: String, application: String, config: serde_json::Value) -> Result<(), String> {
-    // For now, just log the configuration - can be enhanced to save to actual config files
-    println!("Saving config for {} in {}: {:?}", server_id, application, config);
-    Ok(())
+    let mut detector = ApplicationDetector::new().map_err(|e| e.to_string())?;
+    let results = detector.detect_all_applications().await.map_err(|e| e.to_string())?;
+
+    for result in &results {
+        if result.profile.name == application && result.detected {
+            if let Some(config_path) = &result.found_paths.config_file {
+                let config_content = tokio::fs::read_to_string(config_path).await.map_err(|e| e.to_string())?;
+                let mut app_config: serde_json::Value = serde_json::from_str(&config_content).map_err(|e| e.to_string())?;
+
+                if let Some(servers) = app_config.get_mut("mcpServers").and_then(|s| s.as_object_mut()) {
+                    // If the server name has changed, we need to remove the old entry
+                    let new_name = config.get("name").and_then(|n| n.as_str()).unwrap_or(&server_id);
+                    if new_name != server_id {
+                        servers.remove(&server_id);
+                    }
+
+                    // Create a new server config from the provided data
+                    let mut new_server_config = serde_json::Map::new();
+                    if let Some(c) = config.get("command").and_then(|v| v.as_str()) { new_server_config.insert("command".to_string(), c.into()); }
+                    if let Some(a) = config.get("args").and_then(|v| v.as_array()) { new_server_config.insert("args".to_string(), a.clone().into()); }
+                    if let Some(e) = config.get("env").and_then(|v| v.as_object()) { new_server_config.insert("env".to_string(), e.clone().into()); }
+                    if let Some(d) = config.get("description").and_then(|v| v.as_str()) { new_server_config.insert("description".to_string(), d.into()); }
+                    if let Some(enabled) = config.get("enabled").and_then(|v| v.as_bool()) {
+                        if !enabled {
+                            new_server_config.insert("disabled".to_string(), true.into());
+                        }
+                    }
+
+                    // Update the server entry
+                    servers.insert(new_name.to_string(), new_server_config.into());
+
+                    let updated_content = serde_json::to_string_pretty(&app_config).map_err(|e| e.to_string())?;
+                    tokio::fs::write(config_path, updated_content).await.map_err(|e| e.to_string())?;
+
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    Err(format!("Application '{}' not found or not configured", application))
 }
 
 #[tauri::command]
@@ -969,7 +1016,8 @@ async fn main() {
                 let _tray = TrayIconBuilder::new()
                     .icon(app.default_window_icon().unwrap().clone())
                     .menu(&menu)
-                    .tooltip("MCP Control - 3 servers running\nRight-click for options")
+                    .tooltip("MCP Control - 3 servers running
+Right-click for options")
                     .on_menu_event(move |app, event| {
                         match event.id.as_ref() {
                             "quit" => app.exit(0),

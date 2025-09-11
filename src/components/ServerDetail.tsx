@@ -115,6 +115,20 @@ export default function ServerDetail({ serverId, serverName, application, onClos
     }
   };
 
+  const deleteServer = async () => {
+    // Skip confirm dialog since it doesn't work in Tauri
+    try {
+      await invoke('delete_server', { serverName });
+      setMessage('Server deleted successfully!');
+      setTimeout(() => {
+        onClose();
+        onSave();
+      }, 1000);
+    } catch (error) {
+      setMessage(`Failed to delete server: ${error}`);
+    }
+  };
+
   const resetConfig = async () => {
     try {
       await loadServerConfig();
@@ -122,6 +136,7 @@ export default function ServerDetail({ serverId, serverName, application, onClos
       setTimeout(() => setMessage(null), 3000);
     } catch (error) {
       console.error('Failed to reset config:', error);
+      setMessage('Failed to reset configuration');
     }
   };
 
@@ -601,36 +616,61 @@ export default function ServerDetail({ serverId, serverName, application, onClos
             <div style={{ display: 'grid', gap: '16px' }}>
               <div>
                 <h4 style={{ marginBottom: '12px', color: 'var(--text-primary)' }}>
-                  Enable this server in applications:
+                  Server configuration across applications:
                 </h4>
+                <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
+                  Shows which applications currently have this server configured. Checked = server is configured in that application.
+                </p>
                 <div style={{ display: 'grid', gap: '8px' }}>
-                  {['Claude Desktop', 'Cursor', 'Amazon Q Developer', 'Visual Studio Code', 'Zed'].map(app => (
-                    <label key={app} style={{ 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      gap: '8px',
-                      padding: '8px 12px',
-                      background: 'var(--bg-primary)',
-                      borderRadius: '4px',
-                      border: '1px solid var(--border-color)',
-                      color: 'var(--text-primary)'
-                    }}>
-                      <input
-                        type="checkbox"
-                        defaultChecked={app === application}
-                        onChange={(e) => {
-                          // Handle app toggle
-                          console.log(`Toggle ${config.name} in ${app}: ${e.target.checked}`);
-                        }}
-                      />
-                      <div style={{ flex: 1 }}>
-                        {app}
-                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                          {app === application ? 'Currently configured' : 'Not configured'}
+                  {config.availableApplications?.sort((a, b) => a.name.localeCompare(b.name)).map(app => {
+                    const isEnabled = app.enabled; // Use the enabled field from backend
+                    const isConfigured = app.configured; // Use the configured field to show actual config status
+                    
+                    return (
+                      <label key={app.name} style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '8px',
+                        padding: '8px 12px',
+                        background: isEnabled ? 'var(--bg-primary)' : 'var(--bg-secondary)',
+                        borderRadius: '4px',
+                        border: '1px solid var(--border-color)',
+                        color: isEnabled ? 'var(--text-primary)' : 'var(--text-secondary)',
+                        opacity: isEnabled ? 1 : 0.6,
+                        cursor: isEnabled ? 'pointer' : 'not-allowed'
+                      }}>
+                        <input
+                          type="checkbox"
+                          checked={isConfigured}
+                          disabled={!isEnabled}
+                          onChange={(e) => {
+                            if (isEnabled) {
+                              // Handle app toggle
+                              console.log(`Toggle ${config.name} in ${app.name}: ${e.target.checked}`);
+                            }
+                          }}
+                        />
+                        <div style={{ flex: 1 }}>
+                          {app.name}
+                          <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                            {!isEnabled ? 'Enable in Settings to configure' : 
+                             isConfigured ? 'Server is configured' : 'Server not configured'}
+                          </div>
                         </div>
-                      </div>
-                    </label>
-                  ))}
+                        {!isEnabled && (
+                          <span style={{ 
+                            fontSize: '11px', 
+                            padding: '2px 6px', 
+                            background: 'var(--text-secondary)', 
+                            color: 'var(--bg-primary)', 
+                            borderRadius: '3px' 
+                          }}>
+                            DISABLED
+                          </span>
+                        )}
+                      </label>
+                    );
+                  }) || []}
                 </div>
               </div>
             </div>
@@ -726,25 +766,42 @@ export default function ServerDetail({ serverId, serverName, application, onClos
           padding: '20px', 
           borderTop: '1px solid var(--border-color)',
           display: 'flex',
-          justifyContent: 'flex-end',
+          justifyContent: 'space-between',
           gap: '12px'
         }}>
-          <button
-            onClick={resetConfig}
-            className="btn btn-secondary"
-            disabled={saving}
-          >
-            <RotateCcw size={16} style={{ marginRight: '8px' }} />
-            Reset
-          </button>
-          <button
-            onClick={saveConfig}
-            className="btn btn-primary"
-            disabled={saving}
-          >
-            <Save size={16} style={{ marginRight: '8px' }} />
-            {saving ? 'Saving...' : 'Save Configuration'}
-          </button>
+          <div>
+            <button
+              onClick={deleteServer}
+              style={{
+                background: '#e74c3c',
+                color: 'white',
+                border: 'none',
+                padding: '8px 16px',
+                borderRadius: '4px',
+                cursor: 'pointer'
+              }}
+            >
+              Delete Server
+            </button>
+          </div>
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <button
+              onClick={resetConfig}
+              className="btn btn-secondary"
+              disabled={saving}
+            >
+              <RotateCcw size={16} style={{ marginRight: '8px' }} />
+              Reset
+            </button>
+            <button
+              onClick={saveConfig}
+              className="btn btn-primary"
+              disabled={saving}
+            >
+              <Save size={16} style={{ marginRight: '8px' }} />
+              {saving ? 'Saving...' : 'Save Configuration'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

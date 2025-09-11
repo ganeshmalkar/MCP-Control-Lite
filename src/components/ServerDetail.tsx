@@ -22,6 +22,12 @@ interface ServerConfig {
   dependencies: string[];
   startupOrder: number;
   restartOnFailure: boolean;
+  availableApplications?: Array<{
+    name: string;
+    detected: boolean;
+    enabled: boolean;
+    configured: boolean;
+  }>;
 }
 
 interface ServerDetailProps {

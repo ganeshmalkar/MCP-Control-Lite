@@ -8,7 +8,8 @@ import {
   FileText,
   RefreshCw,
   Edit,
-  Search
+  Search,
+  Plus
 } from 'lucide-react';
 import { Application, ViewType } from './types';
 import Settings from './components/Settings';
@@ -28,6 +29,7 @@ function App() {
     name: string;
     application: string;
   } | null>(null);
+  const [showingManualAdd, setShowingManualAdd] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -245,10 +247,19 @@ function App() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <h2>MCP Servers</h2>
-        <button className="btn btn-primary" onClick={loadData}>
-          <RefreshCw size={16} style={{ marginRight: '8px' }} />
-          Refresh
-        </button>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <button 
+            className="btn btn-secondary" 
+            onClick={() => setShowingManualAdd(true)}
+          >
+            <Plus size={16} style={{ marginRight: '8px' }} />
+            Add Server
+          </button>
+          <button className="btn btn-primary" onClick={loadData}>
+            <RefreshCw size={16} style={{ marginRight: '8px' }} />
+            Refresh
+          </button>
+        </div>
       </div>
       
       {systemStatus && (
@@ -291,11 +302,13 @@ function App() {
                   <div className={`status-indicator ${someEnabled ? 'status-enabled' : 'status-disabled'}`}></div>
                   
                   <button
-                    onClick={() => setSelectedServer({
-                      id: `${server.name}-consolidated`,
-                      name: server.name,
-                      application: server.applications[0]?.name || ''
-                    })}
+                    onClick={() => {
+                      setSelectedServer({
+                        id: `${server.name}-consolidated`,
+                        name: server.name,
+                        application: server.applications[0]?.name || ''
+                      });
+                    }}
                     style={{
                       background: 'none',
                       border: 'none',
@@ -521,6 +534,20 @@ function App() {
             setSelectedServer(null);
             loadData(); // Refresh data after save
           }}
+        />
+      )}
+      
+      {showingManualAdd && (
+        <ServerDetail
+          serverId="new-server"
+          serverName="New Server"
+          application="Amazon Q Developer"
+          onClose={() => setShowingManualAdd(false)}
+          onSave={() => {
+            setShowingManualAdd(false);
+            loadData(); // Refresh data after save
+          }}
+          isNewServer={true}
         />
       )}
     </div>

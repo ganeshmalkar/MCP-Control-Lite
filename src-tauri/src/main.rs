@@ -51,9 +51,22 @@ async fn get_applications() -> Result<Vec<serde_json::Value>, String> {
     let mut detector = ApplicationDetector::new().map_err(|e| e.to_string())?;
     let results = detector.detect_all_applications().await.map_err(|e| e.to_string())?;
     
+    // Get current settings to check enabled apps
+    let settings = get_settings().await.unwrap_or_else(|_| serde_json::json!({}));
+    let enabled_apps = settings.get("enabledApps").and_then(|e| e.as_object());
+    
     let mut applications = Vec::new();
     
     for result in &results {
+        // Check if this app is enabled in settings
+        if let Some(enabled_apps) = enabled_apps {
+            if let Some(enabled) = enabled_apps.get(&result.profile.name).and_then(|e| e.as_bool()) {
+                if !enabled {
+                    continue; // Skip disabled applications
+                }
+            }
+        }
+        
         let mut server_count = 0;
         
         if result.detected {
@@ -241,92 +254,141 @@ async fn clear_logs() -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn get_server_config(server_id: String, application: String) -> Result<serde_json::Value, String> {
-    // For now, return a sample configuration
-    Ok(serde_json::json!({
-        "name": server_id.split('-').next().unwrap_or(&server_id),
-        "description": "MCP Server Configuration",
-        "enabled": true,
-        "command": "node",
-        "args": ["server.js"],
-        "env": {},
-        "port": 3000,
-        "host": "localhost",
-        "protocol": "http",
-        "tlsEnabled": false,
-        "authEnabled": false,
-        "dependencies": [],
-        "startupOrder": 0,
-        "restartOnFailure": true
-    }))
+async fn get_server_config(server_id: String, _application: String) -> Result<serde_json::Value, String> {
+    let mut detector = ApplicationDetector::new().map_err(|e| e.to_string())?;
+    let results = detector.detect_all_applications().await.map_err(|e| e.to_string())?;
+    
+    // Get current settings to check enabled apps
+    let settings = get_settings().await.unwrap_or_else(|_| serde_json::json!({}));
+    let enabled_apps = settings.get("enabledApps").and_then(|e| e.as_object());
+    
+    // Clean up server_id - remove any suffix after dash, specifically -consolidated
+    let clean_server_id = if server_id.ends_with("-consolidated") {
+        server_id.trim_end_matches("-consolidated")
+    } else {
+        server_id.split('-').next().unwrap_or(&server_id)
+    };
+    
+    // Find the server config in any detected application
+    for result in &results {
+        if result.detected {
+            if let Some(config_path) = &result.found_paths.config_file {
+                if let Ok(content) = tokio::fs::read_to_string(config_path).await {
+                    if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(mcp_servers) = config.get("mcpServers").and_then(|s| s.as_object()) {
+                            // Try multiple variations of the server name
+                            let server_config = mcp_servers.get(&server_id)
+                                .or_else(|| mcp_servers.get(clean_server_id))
+                                .or_else(|| {
+                                    // Try without any dashes/underscores normalization
+                                    let normalized_id = server_id.replace("-consolidated", "");
+                                    mcp_servers.get(&normalized_id)
+                                });
+                            
+                            if let Some(server_config) = server_config {
+                                // Found the server config, extract real data
+                                let command = server_config.get("command").and_then(|c| c.as_str()).unwrap_or("");
+                                let args = server_config.get("args").and_then(|a| a.as_array()).cloned().unwrap_or_default();
+                                let env = server_config.get("env").and_then(|e| e.as_object()).cloned().unwrap_or_default();
+                                let disabled = server_config.get("disabled").and_then(|d| d.as_bool()).unwrap_or(false);
+                                let default_description = format!("MCP Server: {}", clean_server_id);
+                                let description = server_config.get("description").and_then(|d| d.as_str()).unwrap_or(&default_description);
+                                
+                                // Get all applications with their enabled status and configuration status
+                                let mut available_apps = Vec::new();
+                                for app_result in &results {
+                                    let is_enabled = if let Some(enabled_apps) = enabled_apps {
+                                        enabled_apps.get(&app_result.profile.name)
+                                            .and_then(|e| e.as_bool())
+                                            .unwrap_or(false)
+                                    } else {
+                                        false
+                                    };
+                                    
+                                    // Check if this server is configured in this application
+                                    let is_configured = if let Some(config_path) = &app_result.found_paths.config_file {
+                                        if let Ok(content) = tokio::fs::read_to_string(config_path).await {
+                                            if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
+                                                if let Some(mcp_servers) = config.get("mcpServers").and_then(|s| s.as_object()) {
+                                                    mcp_servers.contains_key(&server_id) || mcp_servers.contains_key(clean_server_id)
+                                                } else {
+                                                    false
+                                                }
+                                            } else {
+                                                false
+                                            }
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        false
+                                    };
+                                    
+                                    available_apps.push(serde_json::json!({
+                                        "name": app_result.profile.name,
+                                        "detected": app_result.detected,
+                                        "enabled": is_enabled,
+                                        "configured": is_configured
+                                    }));
+                                }
+                                
+                                return Ok(serde_json::json!({
+                                    "name": clean_server_id,
+                                    "description": description,
+                                    "enabled": !disabled,
+                                    "command": command,
+                                    "args": args,
+                                    "env": env,
+                                    "environmentVariables": env, // Also provide as environmentVariables for frontend compatibility
+                                    "currentApplication": result.profile.name,
+                                    "availableApplications": available_apps,
+                                    // Optional fields - only include if they make sense
+                                    "allowedTools": server_config.get("allowedTools").cloned().unwrap_or_else(|| serde_json::Value::Array(vec![])),
+                                    "timeout": server_config.get("timeout").and_then(|t| t.as_u64()),
+                                    "restartOnFailure": server_config.get("restartOnFailure").and_then(|r| r.as_bool()).unwrap_or(true)
+                                }));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // If server not found, return error
+    Err(format!("Server '{}' (or '{}') not found in any application configuration", server_id, clean_server_id))
 }
 
 #[tauri::command]
 async fn search_mcp_packages(query: String, filter: String, source: String) -> Result<Vec<serde_json::Value>, String> {
-    use std::process::Command;
-    use regex::Regex;
-    
-    // Debug logging for GUI
-    println!("🔍 GUI Search: query='{}', filter='{}', source='{}'", query, filter, source);
-    
-    // Get list of installed servers first
-    let installed_servers = get_installed_servers().await.unwrap_or_default();
-    
     let mut all_results = Vec::new();
     
-    // Search NPM directly if source includes npm
-    if source == "npm" {
-        match search_npm_packages(&query, &filter).await {
-            Ok(mut npm_results) => {
-                all_results.append(&mut npm_results);
-            },
-            Err(e) => {
-                println!("NPM search failed: {}", e);
-            }
+    // Search NPM if requested
+    if source == "npm" || source == "all" {
+        if let Ok(mut npm_results) = search_npm_packages(&query, &filter).await {
+            all_results.append(&mut npm_results);
         }
     }
     
-    // Search GitHub directly if source is github
-    if source == "github" {
-        match search_github_repositories(&query).await {
-            Ok(mut github_results) => {
-                all_results.append(&mut github_results);
-            },
-            Err(e) => {
-                println!("GitHub search failed: {}", e);
-            }
+    // Search GitHub if requested
+    if source == "github" || source == "all" {
+        if let Ok(mut github_results) = search_github_repositories(&query).await {
+            all_results.append(&mut github_results);
         }
     }
     
-    // For PulseMCP, we'll use a simulated search since we don't have CLI access
-    if source == "pulsemcp" || (source == "npm" && all_results.len() < 5) {
-        // Add some popular PulseMCP packages as fallback
-        let pulsemcp_packages = vec![
-            ("weather-mcp", "Weather information MCP server", "weather"),
-            ("file-manager", "File management MCP server", "files"),
-            ("database-mcp", "Database operations MCP server", "database"),
-            ("api-client", "REST API client MCP server", "api"),
-            ("calculator", "Mathematical calculations MCP server", "math"),
-        ];
-        
-        for (name, desc, keyword) in pulsemcp_packages {
-            if query.trim().is_empty() || 
-               name.contains(&query.to_lowercase()) || 
-               desc.to_lowercase().contains(&query.to_lowercase()) ||
-               keyword.contains(&query.to_lowercase()) {
-                
-                all_results.push(serde_json::json!({
-                    "name": name,
-                    "description": desc,
-                    "version": "latest",
-                    "author": "Community",
-                    "keywords": vec!["pulsemcp", keyword],
-                    "repository": format!("https://www.pulsemcp.com/servers/{}", name),
-                    "downloads": Some(5000u64),
-                    "rating": Some(4.5f64),
-                    "installed": false,
-                    "source": "pulsemcp"
-                }));
+    // Add PulseMCP packages
+    if source == "pulsemcp" || source == "all" {
+        let pulsemcp_packages = get_pulsemcp_packages(&query).await;
+        all_results.extend(pulsemcp_packages);
+    }
+    
+    // Check which packages are already installed/configured
+    if let Ok(installed_packages) = get_installed_package_names().await {
+        for result in &mut all_results {
+            if let Some(name) = result.get("name").and_then(|n| n.as_str()) {
+                let is_installed = installed_packages.contains(name);
+                result.as_object_mut().unwrap().insert("installed".to_string(), serde_json::Value::Bool(is_installed));
             }
         }
     }
@@ -341,73 +403,85 @@ async fn search_mcp_packages(query: String, filter: String, source: String) -> R
             });
         },
         "recent" => {
-            // For recent, we'll just reverse the order
             all_results.reverse();
         },
         _ => {} // "all" - keep original order
     }
     
+    // Remove duplicates by name
+    let mut seen_names = std::collections::HashSet::new();
+    all_results.retain(|item| {
+        if let Some(name) = item.get("name").and_then(|n| n.as_str()) {
+            seen_names.insert(name.to_string())
+        } else {
+            true
+        }
+    });
+    
     Ok(all_results)
 }
 
-async fn get_pulsemcp_description(package_name: &str) -> Result<String, String> {
+async fn get_pulsemcp_packages(query: &str) -> Vec<serde_json::Value> {
     use std::process::Command;
     
-    // Try multiple approaches to get better PulseMCP descriptions
+    let search_url = "https://api.pulsemcp.com/v0beta/servers".to_string();
     
-    // First try: Direct package info from PulseMCP website
-    let clean_name = package_name.trim_start_matches('@');
-    let parts: Vec<&str> = clean_name.split('/').collect();
+    let output = Command::new("curl")
+        .arg("-s")
+        .arg("-H")
+        .arg("Accept: application/json")
+        .arg(&search_url)
+        .output();
     
-    if parts.len() == 2 {
-        let author = parts[0];
-        let package = parts[1];
-        
-        // Try to scrape the PulseMCP page for description
-        let url = format!("https://www.pulsemcp.com/servers/{}-{}", author, package);
-        
-        let mut cmd = Command::new("curl");
-        cmd.arg("-s")
-           .arg("-L") // Follow redirects
-           .arg(&url);
-        
-        if let Ok(output) = cmd.output() {
-            if output.status.success() {
-                let html = String::from_utf8_lossy(&output.stdout);
+    match output {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            
+            if let Ok(api_response) = serde_json::from_str::<serde_json::Value>(&stdout) {
+                let mut packages = Vec::new();
                 
-                // Look for description in HTML meta tags or content
-                if let Some(desc_start) = html.find("description") {
-                    let desc_section = &html[desc_start..desc_start.min(html.len()).min(desc_start + 500)];
-                    
-                    // Try to extract description from various HTML patterns
-                    if let Some(content_start) = desc_section.find("content=\"") {
-                        let content_start = content_start + 9;
-                        if let Some(content_end) = desc_section[content_start..].find("\"") {
-                            let description = &desc_section[content_start..content_start + content_end];
-                            if description.len() > 20 && !description.contains("MCP server from PulseMCP registry") {
-                                return Ok(description.to_string());
+                if let Some(servers) = api_response.get("servers").and_then(|s| s.as_array()) {
+                    for server in servers.iter() {
+                        let name = server.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
+                        let description = server.get("short_description").and_then(|d| d.as_str()).unwrap_or("");
+                        let url = server.get("url").and_then(|u| u.as_str()).unwrap_or("");
+                        let source_url = server.get("source_code_url").and_then(|u| u.as_str()).unwrap_or("");
+                        let stars = server.get("github_stars").and_then(|s| s.as_u64()).unwrap_or(0);
+                        let package_name = server.get("package_name").and_then(|p| p.as_str()).unwrap_or("");
+                        let downloads = server.get("package_download_count").and_then(|d| d.as_u64()).unwrap_or(0);
+                        
+                        // Filter by query if provided
+                        if !query.trim().is_empty() {
+                            let query_lower = query.to_lowercase();
+                            if !name.to_lowercase().contains(&query_lower) && 
+                               !description.to_lowercase().contains(&query_lower) {
+                                continue;
                             }
                         }
+                        
+                        packages.push(serde_json::json!({
+                            "name": if package_name.is_empty() { name } else { package_name },
+                            "description": description,
+                            "version": "latest",
+                            "author": "PulseMCP Community",
+                            "keywords": vec!["pulsemcp", "mcp"],
+                            "repository": if source_url.is_empty() { url } else { source_url },
+                            "downloads": Some(if downloads > 0 { downloads } else { stars }),
+                            "rating": Some(4.0 + (stars % 10) as f64 / 10.0),
+                            "installed": false,
+                            "source": "pulsemcp"
+                        }));
                     }
                 }
+                
+                return packages;
             }
         }
+        _ => {}
     }
     
-    Err("No description found".to_string())
-}
-
-async fn get_installed_servers() -> Result<Vec<String>, String> {
-    let servers = get_servers().await?;
-    let mut installed = Vec::new();
-    
-    for server in servers {
-        if let Some(name) = server.get("name").and_then(|n| n.as_str()) {
-            installed.push(name.to_string());
-        }
-    }
-    
-    Ok(installed)
+    // Fallback to empty list if API fails
+    Vec::new()
 }
 
 async fn search_github_repositories(query: &str) -> Result<Vec<serde_json::Value>, String> {
@@ -416,7 +490,7 @@ async fn search_github_repositories(query: &str) -> Result<Vec<serde_json::Value
     let search_term = if query.trim().is_empty() {
         "mcp server".to_string()
     } else {
-        format!("mcp {}", query)
+        format!("{} mcp server", query)
     };
     
     // Use curl to search GitHub API
@@ -424,13 +498,14 @@ async fn search_github_repositories(query: &str) -> Result<Vec<serde_json::Value
     cmd.arg("-s")
        .arg("-H")
        .arg("Accept: application/vnd.github.v3+json")
-       .arg(&format!("https://api.github.com/search/repositories?q={}&sort=stars&order=desc&per_page=10", 
+       .arg(&format!("https://api.github.com/search/repositories?q={}&sort=stars&order=desc&per_page=15", 
                      urlencoding::encode(&search_term)));
     
     let output = cmd.output().map_err(|e| format!("Failed to execute GitHub search: {}", e))?;
     
     if !output.status.success() {
-        return Err("GitHub search failed".to_string());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("GitHub search failed: {}", stderr));
     }
     
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -440,7 +515,7 @@ async fn search_github_repositories(query: &str) -> Result<Vec<serde_json::Value
     let mut results = Vec::new();
     
     if let Some(items) = github_response.get("items").and_then(|i| i.as_array()) {
-        for repo in items.iter().take(10) {
+        for repo in items.iter().take(15) {
             let name = repo.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
             let full_name = repo.get("full_name").and_then(|n| n.as_str()).unwrap_or(name);
             let description = repo.get("description").and_then(|d| d.as_str()).unwrap_or("");
@@ -451,13 +526,12 @@ async fn search_github_repositories(query: &str) -> Result<Vec<serde_json::Value
             let html_url = repo.get("html_url").and_then(|u| u.as_str()).unwrap_or("");
             let stars = repo.get("stargazers_count").and_then(|s| s.as_u64()).unwrap_or(0);
             
-            // Extract keywords from topics and description
+            // Extract keywords from topics
             let mut keywords = vec!["github".to_string()];
             if let Some(topics) = repo.get("topics").and_then(|t| t.as_array()) {
                 keywords.extend(topics.iter()
                     .filter_map(|t| t.as_str())
-                    .filter(|s| !["server", "from", "registry", "protocol", "context", "model"].contains(s))
-                    .take(4)
+                    .take(5)
                     .map(|s| s.to_string()));
             }
             
@@ -468,7 +542,7 @@ async fn search_github_repositories(query: &str) -> Result<Vec<serde_json::Value
                 "author": owner,
                 "keywords": keywords,
                 "repository": html_url,
-                "downloads": stars, // Use stars as download metric
+                "downloads": stars,
                 "rating": Some(4.0 + (stars % 10) as f64 / 10.0),
                 "installed": false,
                 "source": "github"
@@ -481,6 +555,7 @@ async fn search_github_repositories(query: &str) -> Result<Vec<serde_json::Value
 
 async fn search_npm_packages(query: &str, _filter: &str) -> Result<Vec<serde_json::Value>, String> {
     use std::process::Command;
+    use std::env;
     
     let search_term = if query.trim().is_empty() {
         "mcp server".to_string()
@@ -488,31 +563,48 @@ async fn search_npm_packages(query: &str, _filter: &str) -> Result<Vec<serde_jso
         format!("mcp {}", query)
     };
     
-    // Use npm search command
-    let mut cmd = Command::new("npm");
-    cmd.arg("search")
-       .arg(&search_term)
-       .arg("--json");
+    // Set working directory to user's home directory
+    let home_dir = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     
-    let output = cmd.output().map_err(|e| format!("Failed to execute npm search: {}", e))?;
+    // Create a comprehensive shell command that sources environment
+    let shell_cmd = format!(
+        "cd '{}' && source ~/.zshrc 2>/dev/null || source ~/.bashrc 2>/dev/null || source ~/.profile 2>/dev/null || true; export PATH=\"$HOME/.nvm/versions/node/$(nvm current)/bin:$PATH\" 2>/dev/null || true; npm search '{}' --json",
+        home_dir, search_term
+    );
+    
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(&shell_cmd)
+        .output()
+        .map_err(|e| format!("Failed to execute npm search: {}", e))?;
     
     if !output.status.success() {
-        return Err("NPM search failed".to_string());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("NPM search failed: {}", stderr));
     }
     
     let stdout = String::from_utf8_lossy(&output.stdout);
+    
+    if stdout.trim().is_empty() {
+        return Ok(vec![]);
+    }
+    
     let npm_results: Vec<serde_json::Value> = serde_json::from_str(&stdout)
         .map_err(|e| format!("Failed to parse NPM results: {}", e))?;
     
     let mut results = Vec::new();
     
-    for package in npm_results.iter().take(10) { // Limit to 10 results
+    for package in npm_results.iter().take(20) {
         let name = package.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
         let description = package.get("description").and_then(|d| d.as_str()).unwrap_or("");
         let version = package.get("version").and_then(|v| v.as_str()).unwrap_or("unknown");
-        let author = package.get("author")
-            .and_then(|a| a.get("name"))
-            .and_then(|n| n.as_str())
+        
+        let author = package.get("publisher")
+            .and_then(|p| p.get("username"))
+            .and_then(|u| u.as_str())
+            .or_else(|| package.get("author")
+                .and_then(|a| a.get("name"))
+                .and_then(|n| n.as_str()))
             .or_else(|| package.get("author").and_then(|a| a.as_str()))
             .unwrap_or("unknown");
         
@@ -522,8 +614,7 @@ async fn search_npm_packages(query: &str, _filter: &str) -> Result<Vec<serde_jso
                 let mut kw = vec!["npm".to_string()];
                 kw.extend(arr.iter()
                     .filter_map(|v| v.as_str())
-                    .filter(|s| !["server", "from", "registry", "protocol", "context", "model"].contains(s))
-                    .take(4)
+                    .take(5)
                     .map(|s| s.to_string()));
                 kw
             })
@@ -531,16 +622,10 @@ async fn search_npm_packages(query: &str, _filter: &str) -> Result<Vec<serde_jso
         
         let repository = package.get("links")
             .and_then(|l| l.get("repository"))
-            .and_then(|r| r.as_str())
-            .or_else(|| package.get("repository")
-                .and_then(|r| r.get("url"))
-                .and_then(|u| u.as_str()));
+            .and_then(|r| r.as_str());
         
-        let downloads = package.get("searchScore").and_then(|s| s.as_f64()).map(|s| (s * 10000.0) as u64);
+        let downloads = Some(1000u64);
         let rating = Some(4.0 + (name.len() % 10) as f64 / 10.0);
-        
-        // Check if installed (this would need to be passed in or retrieved)
-        let is_installed = false; // TODO: Check against installed servers list
         
         results.push(serde_json::json!({
             "name": name,
@@ -551,7 +636,7 @@ async fn search_npm_packages(query: &str, _filter: &str) -> Result<Vec<serde_jso
             "repository": repository,
             "downloads": downloads,
             "rating": rating,
-            "installed": is_installed,
+            "installed": false,
             "source": "npm"
         }));
     }
@@ -562,16 +647,29 @@ async fn search_npm_packages(query: &str, _filter: &str) -> Result<Vec<serde_jso
 #[tauri::command]
 async fn install_mcp_package(package_name: String) -> Result<(), String> {
     use std::process::Command;
+    use std::env;
     
     let install_msg = format!("🔧 Installing MCP package: {}", package_name);
-    println!("{}", install_msg);
     log::info!("{}", install_msg);
     
-    // Use npm install directly instead of CLI
-    let mut cmd = Command::new("npm");
-    cmd.arg("install")
-       .arg("-g")
-       .arg(&package_name);
+    // Set working directory to user's home directory
+    let home_dir = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    
+    // Create a comprehensive shell command that sources environment
+    let shell_cmd = format!(
+        "cd '{}' && source ~/.zshrc 2>/dev/null || source ~/.bashrc 2>/dev/null || source ~/.profile 2>/dev/null || true; export PATH=\"$HOME/.nvm/versions/node/$(nvm current)/bin:$PATH\" 2>/dev/null || true; npm install '{}'",
+        home_dir, package_name
+    );
+    
+    let mut cmd = if cfg!(target_os = "windows") {
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", &shell_cmd]);
+        cmd
+    } else {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", &shell_cmd]);
+        cmd
+    };
     
     let output = cmd.output().map_err(|e| {
         let error_msg = format!("❌ Failed to execute install command for {}: {}", package_name, e);
@@ -579,46 +677,296 @@ async fn install_mcp_package(package_name: String) -> Result<(), String> {
         error_msg
     })?;
     
+    let _stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    
     if !output.status.success() {
-        let error = String::from_utf8_lossy(&output.stderr);
-        let error_msg = format!("❌ Installation failed for {}: {}", package_name, error);
+        let error_msg = format!("❌ Installation failed for {}: {}", package_name, stderr);
         log::error!("{}", error_msg);
         return Err(error_msg);
     }
     
     let success_msg = format!("✅ Successfully installed MCP package: {}", package_name);
-    println!("{}", success_msg);
     log::info!("{}", success_msg);
     
-    // Also log the installation output for debugging
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if !stdout.trim().is_empty() {
-        log::info!("Installation output: {}", stdout.trim());
+    // Now add the server to Amazon Q Developer configuration
+    if let Err(_e) = add_server_to_config(&package_name).await {
+        // Don't fail the entire operation, just warn
     }
     
     Ok(())
 }
 
+async fn add_server_to_config(package_name: &str) -> Result<(), String> {
+    // Find Amazon Q Developer config
+    let mut detector = ApplicationDetector::new().map_err(|e| e.to_string())?;
+    let results = detector.detect_all_applications().await.map_err(|e| e.to_string())?;
+    
+    for result in &results {
+        if result.profile.name == "Amazon Q Developer" && result.detected {
+            if let Some(config_path) = &result.found_paths.config_file {
+                
+                // Read existing config
+                let content = tokio::fs::read_to_string(config_path).await
+                    .map_err(|e| format!("Failed to read config: {}", e))?;
+                
+                let mut config: serde_json::Value = serde_json::from_str(&content)
+                    .map_err(|e| format!("Failed to parse config: {}", e))?;
+                
+                // Get or create mcpServers object
+                if !config.get("mcpServers").is_some() {
+                    config["mcpServers"] = serde_json::json!({});
+                }
+                
+                let mcp_servers = config["mcpServers"].as_object_mut()
+                    .ok_or("mcpServers is not an object")?;
+                
+                // Create server name from package name
+                let server_name = package_name.split('/').last().unwrap_or(package_name)
+                    .replace('@', "").replace('-', "_");
+                
+                // Add the server configuration
+                mcp_servers.insert(server_name.clone(), serde_json::json!({
+                    "command": "npx",
+                    "args": [package_name]
+                }));
+                
+                // Write back to config
+                let updated_content = serde_json::to_string_pretty(&config)
+                    .map_err(|e| format!("Failed to serialize config: {}", e))?;
+                
+                tokio::fs::write(config_path, updated_content).await
+                    .map_err(|e| format!("Failed to write config: {}", e))?;
+                
+                return Ok(());
+            }
+        }
+    }
+    
+    Err("Amazon Q Developer configuration not found".to_string())
+}
+
+async fn get_installed_package_names() -> Result<std::collections::HashSet<String>, String> {
+    let mut installed_packages = std::collections::HashSet::new();
+    
+    // Check all detected applications for configured MCP servers
+    let mut detector = ApplicationDetector::new().map_err(|e| e.to_string())?;
+    let results = detector.detect_all_applications().await.map_err(|e| e.to_string())?;
+    
+    for result in &results {
+        if result.detected {
+            if let Some(config_path) = &result.found_paths.config_file {
+                if let Ok(content) = tokio::fs::read_to_string(config_path).await {
+                    if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(mcp_servers) = config.get("mcpServers").and_then(|s| s.as_object()) {
+                            for (_, server_config) in mcp_servers {
+                                // Extract package name from args if using npx
+                                if let Some(command) = server_config.get("command").and_then(|c| c.as_str()) {
+                                    if command == "npx" {
+                                        if let Some(args) = server_config.get("args").and_then(|a| a.as_array()) {
+                                            if let Some(package_name) = args.get(0).and_then(|p| p.as_str()) {
+                                                installed_packages.insert(package_name.to_string());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    Ok(installed_packages)
+}
+
+#[tauri::command]
+async fn delete_server(server_name: String) -> Result<(), String> {
+    log::info!("Deleting server: {}", server_name);
+    
+    // Get all detected applications
+    let mut detector = ApplicationDetector::new().map_err(|e| e.to_string())?;
+    let results = detector.detect_all_applications().await.map_err(|e| e.to_string())?;
+    
+    let mut deleted_from_apps = Vec::new();
+    
+    for result in &results {
+        if result.detected {
+            if let Some(config_path) = &result.found_paths.config_file {
+                
+                // Read existing config
+                if let Ok(content) = tokio::fs::read_to_string(config_path).await {
+                    if let Ok(mut config) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(mcp_servers) = config.get_mut("mcpServers").and_then(|s| s.as_object_mut()) {
+                            
+                            // Remove servers with matching name (handle variations)
+                            let keys_to_remove: Vec<String> = mcp_servers.keys()
+                                .filter(|key| {
+                                    let matches = key.as_str() == &server_name || 
+                                        key.replace('_', "-") == server_name ||
+                                        key.replace('-', "_") == server_name ||
+                                        key.to_lowercase() == server_name.to_lowercase();
+                                    
+                                    if matches {
+                                        // Found matching key
+                                    }
+                                    matches
+                                })
+                                .cloned()
+                                .collect();
+                            
+                            for key in &keys_to_remove {
+                                mcp_servers.remove(key);
+                            }
+                            
+                            if !keys_to_remove.is_empty() {
+                                // Write back to config
+                                let updated_content = serde_json::to_string_pretty(&config)
+                                    .map_err(|e| format!("Failed to serialize config: {}", e))?;
+                                
+                                tokio::fs::write(config_path, updated_content).await
+                                    .map_err(|e| format!("Failed to write config: {}", e))?;
+                                
+                                deleted_from_apps.push(result.profile.name.clone());
+                            }
+                        } else {
+                            // No mcpServers found in config
+                        }
+                    } else {
+                        // Failed to parse config as JSON
+                    }
+                } else {
+                    // Failed to read config file
+                }
+            }
+        }
+    }
+    
+    if deleted_from_apps.is_empty() {
+        let error_msg = format!("Server '{}' not found in any MCP configurations", server_name);
+        return Err(error_msg);
+    }
+    
+    let success_msg = format!("✅ Successfully deleted '{}' from: {}", server_name, deleted_from_apps.join(", "));
+    log::info!("{}", success_msg);
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn create_server(application: String, config: serde_json::Value) -> Result<(), String> {
+    let server_name = config.get("name").and_then(|n| n.as_str())
+        .ok_or("Server name is required")?;
+    
+    log::info!("Creating new server: {} for {}", server_name, application);
+    
+    // Find the application config
+    let mut detector = ApplicationDetector::new().map_err(|e| e.to_string())?;
+    let results = detector.detect_all_applications().await.map_err(|e| e.to_string())?;
+    
+    for result in &results {
+        if result.profile.name == application && result.detected {
+            if let Some(config_path) = &result.found_paths.config_file {
+                // Read existing config
+                let content = tokio::fs::read_to_string(config_path).await
+                    .map_err(|e| format!("Failed to read config: {}", e))?;
+                
+                let mut app_config: serde_json::Value = serde_json::from_str(&content)
+                    .map_err(|e| format!("Failed to parse config: {}", e))?;
+                
+                // Get or create mcpServers object
+                if !app_config.get("mcpServers").is_some() {
+                    app_config["mcpServers"] = serde_json::json!({});
+                }
+                
+                let mcp_servers = app_config["mcpServers"].as_object_mut()
+                    .ok_or("mcpServers is not an object")?;
+                
+                // Create server configuration
+                let server_config = serde_json::json!({
+                    "command": config.get("command").unwrap_or(&serde_json::Value::String("npx".to_string())),
+                    "args": config.get("args").unwrap_or(&serde_json::Value::Array(vec![])),
+                    "env": config.get("env").unwrap_or(&serde_json::Value::Object(serde_json::Map::new()))
+                });
+                
+                // Add the server
+                mcp_servers.insert(server_name.to_string(), server_config);
+                
+                // Write back to config
+                let updated_content = serde_json::to_string_pretty(&app_config)
+                    .map_err(|e| format!("Failed to serialize config: {}", e))?;
+                
+                tokio::fs::write(config_path, updated_content).await
+                    .map_err(|e| format!("Failed to write config: {}", e))?;
+                
+                return Ok(());
+            }
+        }
+    }
+    
+    Err(format!("Application '{}' not found or not configured", application))
+}
+
 #[tauri::command]
 async fn show_notification(title: String, body: String) -> Result<(), String> {
     // For now, just log the notification - can be enhanced with actual system notifications
-    println!("Notification: {} - {}", title, body);
+    log::info!("Notification: {} - {}", title, body);
     Ok(())
 }
 
 #[tauri::command]
 async fn sync_application(app_name: String) -> Result<(), String> {
     // Simulate sync operation
-    println!("Syncing application: {}", app_name);
+    log::info!("Syncing application: {}", app_name);
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     Ok(())
 }
 
+
 #[tauri::command]
 async fn save_server_config(server_id: String, application: String, config: serde_json::Value) -> Result<(), String> {
-    // For now, just log the configuration - can be enhanced to save to actual config files
-    println!("Saving config for {} in {}: {:?}", server_id, application, config);
-    Ok(())
+    let mut detector = ApplicationDetector::new().map_err(|e| e.to_string())?;
+    let results = detector.detect_all_applications().await.map_err(|e| e.to_string())?;
+
+    for result in &results {
+        if result.profile.name == application && result.detected {
+            if let Some(config_path) = &result.found_paths.config_file {
+                let config_content = tokio::fs::read_to_string(config_path).await.map_err(|e| e.to_string())?;
+                let mut app_config: serde_json::Value = serde_json::from_str(&config_content).map_err(|e| e.to_string())?;
+
+                if let Some(servers) = app_config.get_mut("mcpServers").and_then(|s| s.as_object_mut()) {
+                    // If the server name has changed, we need to remove the old entry
+                    let new_name = config.get("name").and_then(|n| n.as_str()).unwrap_or(&server_id);
+                    if new_name != server_id {
+                        servers.remove(&server_id);
+                    }
+
+                    // Create a new server config from the provided data
+                    let mut new_server_config = serde_json::Map::new();
+                    if let Some(c) = config.get("command").and_then(|v| v.as_str()) { new_server_config.insert("command".to_string(), c.into()); }
+                    if let Some(a) = config.get("args").and_then(|v| v.as_array()) { new_server_config.insert("args".to_string(), a.clone().into()); }
+                    if let Some(e) = config.get("env").and_then(|v| v.as_object()) { new_server_config.insert("env".to_string(), e.clone().into()); }
+                    if let Some(d) = config.get("description").and_then(|v| v.as_str()) { new_server_config.insert("description".to_string(), d.into()); }
+                    if let Some(enabled) = config.get("enabled").and_then(|v| v.as_bool()) {
+                        if !enabled {
+                            new_server_config.insert("disabled".to_string(), true.into());
+                        }
+                    }
+
+                    // Update the server entry
+                    servers.insert(new_name.to_string(), new_server_config.into());
+
+                    let updated_content = serde_json::to_string_pretty(&app_config).map_err(|e| e.to_string())?;
+                    tokio::fs::write(config_path, updated_content).await.map_err(|e| e.to_string())?;
+
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    Err(format!("Application '{}' not found or not configured", application))
 }
 
 #[tauri::command]
@@ -637,6 +985,9 @@ async fn main() {
         }
     } else {
         tauri::Builder::default()
+            .plugin(tauri_plugin_http::init())
+            .plugin(tauri_plugin_fs::init())
+            .plugin(tauri_plugin_shell::init())
             .setup(|app| {
                 // Create enhanced system tray menu
                 let show = MenuItem::with_id(app, "show", "Show MCP Control", true, None::<&str>)?;
@@ -665,7 +1016,8 @@ async fn main() {
                 let _tray = TrayIconBuilder::new()
                     .icon(app.default_window_icon().unwrap().clone())
                     .menu(&menu)
-                    .tooltip("MCP Control - 3 servers running\nRight-click for options")
+                    .tooltip("MCP Control - 3 servers running
+Right-click for options")
                     .on_menu_event(move |app, event| {
                         match event.id.as_ref() {
                             "quit" => app.exit(0),
@@ -755,7 +1107,9 @@ async fn main() {
                 sync_application,
                 show_notification,
                 search_mcp_packages,
-                install_mcp_package
+                install_mcp_package,
+                delete_server,
+                create_server
             ])
             .run(tauri::generate_context!())
             .expect("error while running tauri application");

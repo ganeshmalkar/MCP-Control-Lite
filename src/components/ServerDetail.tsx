@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Save, RotateCcw, X, Settings, Shield, Link, Monitor } from 'lucide-react';
+import { Save, RotateCcw, X, Settings, Shield, Link, Monitor, Code } from 'lucide-react';
 
 interface ServerConfig {
   name: string;
@@ -22,6 +22,12 @@ interface ServerConfig {
   dependencies: string[];
   startupOrder: number;
   restartOnFailure: boolean;
+  availableApplications?: Array<{
+    name: string;
+    detected: boolean;
+    enabled: boolean;
+    configured: boolean;
+  }>;
 }
 
 interface ServerDetailProps {
@@ -30,9 +36,10 @@ interface ServerDetailProps {
   application: string;
   onClose: () => void;
   onSave: () => void;
+  isNewServer?: boolean;
 }
 
-export default function ServerDetail({ serverId, serverName, application, onClose, onSave }: ServerDetailProps) {
+export default function ServerDetail({ serverId, serverName, application, onClose, onSave, isNewServer = false }: ServerDetailProps) {
   const [config, setConfig] = useState<ServerConfig>({
     name: serverName,
     description: '',
@@ -49,12 +56,23 @@ export default function ServerDetail({ serverId, serverName, application, onClos
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'basic' | 'advanced' | 'dependencies' | 'applications'>('basic');
+  const [activeTab, setActiveTab] = useState<'basic' | 'advanced' | 'dependencies' | 'applications' | 'editor'>('basic');
   const [message, setMessage] = useState<string | null>(null);
+  const [jsonEditor, setJsonEditor] = useState<string>('');
 
   useEffect(() => {
-    loadServerConfig();
-  }, [serverId]);
+    if (!isNewServer) {
+      loadServerConfig();
+    } else {
+      setLoading(false);
+    }
+  }, [serverId, isNewServer]);
+
+  useEffect(() => {
+    if (activeTab === 'editor') {
+      updateJsonEditor();
+    }
+  }, [activeTab, config]);
 
   const loadServerConfig = async () => {
     try {
@@ -62,7 +80,11 @@ export default function ServerDetail({ serverId, serverName, application, onClos
         serverId, 
         application 
       });
-      setConfig(serverConfig);
+      // Ensure env is always an object
+      setConfig({
+        ...serverConfig,
+        env: serverConfig.env || {}
+      });
     } catch (error) {
       console.error('Failed to load server config:', error);
       setMessage('Failed to load server configuration');
@@ -75,19 +97,41 @@ export default function ServerDetail({ serverId, serverName, application, onClos
     setSaving(true);
     setMessage(null);
     try {
-      await invoke('save_server_config', { 
-        serverId, 
-        application, 
-        config 
-      });
-      setMessage('Configuration saved successfully!');
+      if (isNewServer) {
+        await invoke('create_server', { 
+          application, 
+          config 
+        });
+        setMessage('Server created successfully!');
+      } else {
+        await invoke('save_server_config', { 
+          serverId, 
+          application, 
+          config 
+        });
+        setMessage('Configuration saved successfully!');
+      }
       setTimeout(() => setMessage(null), 3000);
       onSave();
     } catch (error) {
       console.error('Failed to save config:', error);
-      setMessage('Failed to save configuration');
+      setMessage(isNewServer ? 'Failed to create server' : 'Failed to save configuration');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const deleteServer = async () => {
+    // Skip confirm dialog since it doesn't work in Tauri
+    try {
+      await invoke('delete_server', { serverName });
+      setMessage('Server deleted successfully!');
+      setTimeout(() => {
+        onClose();
+        onSave();
+      }, 1000);
+    } catch (error) {
+      setMessage(`Failed to delete server: ${error}`);
     }
   };
 
@@ -98,6 +142,7 @@ export default function ServerDetail({ serverId, serverName, application, onClos
       setTimeout(() => setMessage(null), 3000);
     } catch (error) {
       console.error('Failed to reset config:', error);
+      setMessage('Failed to reset configuration');
     }
   };
 
@@ -113,6 +158,46 @@ export default function ServerDetail({ serverId, serverName, application, onClos
 
   const removeArg = (index: number) => {
     setConfig({ ...config, args: config.args.filter((_, i) => i !== index) });
+  };
+
+  const addEnv = () => {
+    const newKey = `ENV_VAR_${Object.keys(config.env).length + 1}`;
+    setConfig({ ...config, env: { ...config.env, [newKey]: '' } });
+  };
+
+  const updateEnvKey = (oldKey: string, newKey: string) => {
+    if (oldKey === newKey) return;
+    const newEnv = { ...config.env };
+    const value = newEnv[oldKey];
+    delete newEnv[oldKey];
+    newEnv[newKey] = value;
+    setConfig({ ...config, env: newEnv });
+  };
+
+  const updateEnvValue = (key: string, value: string) => {
+    setConfig({ ...config, env: { ...config.env, [key]: value } });
+  };
+
+  const removeEnv = (key: string) => {
+    const newEnv = { ...config.env };
+    delete newEnv[key];
+    setConfig({ ...config, env: newEnv });
+  };
+
+  const updateJsonEditor = () => {
+    setJsonEditor(JSON.stringify(config, null, 2));
+  };
+
+  const applyJsonEditor = () => {
+    try {
+      const parsedConfig = JSON.parse(jsonEditor);
+      setConfig({ ...config, ...parsedConfig, env: parsedConfig.env || {} });
+      setMessage('JSON configuration applied successfully!');
+      setTimeout(() => setMessage(null), 3000);
+    } catch (error) {
+      setMessage('Invalid JSON format. Please check your syntax.');
+      setTimeout(() => setMessage(null), 3000);
+    }
   };
 
   if (loading) {
@@ -212,7 +297,8 @@ export default function ServerDetail({ serverId, serverName, application, onClos
             { id: 'basic', label: 'Basic', icon: Settings },
             { id: 'advanced', label: 'Advanced', icon: Shield },
             { id: 'dependencies', label: 'Dependencies', icon: Link },
-            { id: 'applications', label: 'Applications', icon: Monitor }
+            { id: 'applications', label: 'Applications', icon: Monitor },
+            { id: 'editor', label: 'Code Editor', icon: Code }
           ].map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -237,6 +323,19 @@ export default function ServerDetail({ serverId, serverName, application, onClos
 
         {/* Content */}
         <div style={{ flex: 1, padding: '20px', overflow: 'auto' }}>
+          {/* Clarification Banner */}
+          <div style={{
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '6px',
+            padding: '12px 16px',
+            marginBottom: '20px',
+            color: 'var(--text-secondary)',
+            fontSize: '14px'
+          }}>
+            <strong style={{ color: 'var(--text-primary)' }}>Note:</strong> This editor modifies MCP Control Lite's internal settings for this server, not the original MCP configuration files. Changes here affect how this application manages and displays the server.
+          </div>
+
           {activeTab === 'basic' && (
             <div style={{ display: 'grid', gap: '16px' }}>
               <div>
@@ -337,6 +436,64 @@ export default function ServerDetail({ serverId, serverName, application, onClos
                   style={{ marginTop: '8px' }}
                 >
                   Add Argument
+                </button>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-primary)' }}>
+                  Environment Variables
+                </label>
+                {Object.entries(config.env).map(([key, value], index) => (
+                  <div key={index} style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                    <input
+                      type="text"
+                      placeholder="Key"
+                      value={key}
+                      onChange={(e) => updateEnvKey(key, e.target.value)}
+                      style={{
+                        flex: 1,
+                        padding: '8px',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '4px',
+                        background: 'var(--bg-primary)',
+                        color: 'var(--text-primary)'
+                      }}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Value"
+                      value={value}
+                      onChange={(e) => updateEnvValue(key, e.target.value)}
+                      style={{
+                        flex: 2,
+                        padding: '8px',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '4px',
+                        background: 'var(--bg-primary)',
+                        color: 'var(--text-primary)'
+                      }}
+                    />
+                    <button
+                      onClick={() => removeEnv(key)}
+                      style={{
+                        padding: '8px',
+                        background: '#e74c3c',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  onClick={addEnv}
+                  className="btn btn-secondary"
+                  style={{ marginTop: '8px' }}
+                >
+                  Add Environment Variable
                 </button>
               </div>
             </div>
@@ -465,36 +622,61 @@ export default function ServerDetail({ serverId, serverName, application, onClos
             <div style={{ display: 'grid', gap: '16px' }}>
               <div>
                 <h4 style={{ marginBottom: '12px', color: 'var(--text-primary)' }}>
-                  Enable this server in applications:
+                  Server configuration across applications:
                 </h4>
+                <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
+                  Shows which applications currently have this server configured. Checked = server is configured in that application.
+                </p>
                 <div style={{ display: 'grid', gap: '8px' }}>
-                  {['Claude Desktop', 'Cursor', 'Amazon Q Developer', 'Visual Studio Code', 'Zed'].map(app => (
-                    <label key={app} style={{ 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      gap: '8px',
-                      padding: '8px 12px',
-                      background: 'var(--bg-primary)',
-                      borderRadius: '4px',
-                      border: '1px solid var(--border-color)',
-                      color: 'var(--text-primary)'
-                    }}>
-                      <input
-                        type="checkbox"
-                        defaultChecked={app === application}
-                        onChange={(e) => {
-                          // Handle app toggle
-                          console.log(`Toggle ${config.name} in ${app}: ${e.target.checked}`);
-                        }}
-                      />
-                      <div style={{ flex: 1 }}>
-                        {app}
-                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                          {app === application ? 'Currently configured' : 'Not configured'}
+                  {config.availableApplications?.sort((a, b) => a.name.localeCompare(b.name)).map(app => {
+                    const isEnabled = app.enabled; // Use the enabled field from backend
+                    const isConfigured = app.configured; // Use the configured field to show actual config status
+                    
+                    return (
+                      <label key={app.name} style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '8px',
+                        padding: '8px 12px',
+                        background: isEnabled ? 'var(--bg-primary)' : 'var(--bg-secondary)',
+                        borderRadius: '4px',
+                        border: '1px solid var(--border-color)',
+                        color: isEnabled ? 'var(--text-primary)' : 'var(--text-secondary)',
+                        opacity: isEnabled ? 1 : 0.6,
+                        cursor: isEnabled ? 'pointer' : 'not-allowed'
+                      }}>
+                        <input
+                          type="checkbox"
+                          checked={isConfigured}
+                          disabled={!isEnabled}
+                          onChange={(e) => {
+                            if (isEnabled) {
+                              // Handle app toggle
+                              console.log(`Toggle ${config.name} in ${app.name}: ${e.target.checked}`);
+                            }
+                          }}
+                        />
+                        <div style={{ flex: 1 }}>
+                          {app.name}
+                          <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                            {!isEnabled ? 'Enable in Settings to configure' : 
+                             isConfigured ? 'Server is configured' : 'Server not configured'}
+                          </div>
                         </div>
-                      </div>
-                    </label>
-                  ))}
+                        {!isEnabled && (
+                          <span style={{ 
+                            fontSize: '11px', 
+                            padding: '2px 6px', 
+                            background: 'var(--text-secondary)', 
+                            color: 'var(--bg-primary)', 
+                            borderRadius: '3px' 
+                          }}>
+                            DISABLED
+                          </span>
+                        )}
+                      </label>
+                    );
+                  }) || []}
                 </div>
               </div>
             </div>
@@ -536,6 +718,53 @@ export default function ServerDetail({ serverId, serverName, application, onClos
               </div>
             </div>
           )}
+
+          {activeTab === 'editor' && (
+            <div style={{ display: 'grid', gap: '16px' }}>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <h4 style={{ color: 'var(--text-primary)', margin: 0 }}>JSON Configuration Editor</h4>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      onClick={updateJsonEditor}
+                      className="btn btn-secondary"
+                      style={{ fontSize: '12px', padding: '6px 12px' }}
+                    >
+                      Refresh from GUI
+                    </button>
+                    <button
+                      onClick={applyJsonEditor}
+                      className="btn btn-primary"
+                      style={{ fontSize: '12px', padding: '6px 12px' }}
+                    >
+                      Apply to GUI
+                    </button>
+                  </div>
+                </div>
+                <textarea
+                  value={jsonEditor}
+                  onChange={(e) => setJsonEditor(e.target.value)}
+                  style={{
+                    width: '100%',
+                    height: '400px',
+                    padding: '12px',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '4px',
+                    background: 'var(--bg-primary)',
+                    color: 'var(--text-primary)',
+                    fontFamily: 'Monaco, Consolas, "Courier New", monospace',
+                    fontSize: '12px',
+                    lineHeight: '1.4',
+                    resize: 'vertical'
+                  }}
+                  placeholder="JSON configuration will appear here..."
+                />
+                <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '8px 0 0 0' }}>
+                  Edit the JSON configuration directly. Click "Apply to GUI" to update the form fields, or "Refresh from GUI" to sync from the current form values.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Footer */}
@@ -543,25 +772,42 @@ export default function ServerDetail({ serverId, serverName, application, onClos
           padding: '20px', 
           borderTop: '1px solid var(--border-color)',
           display: 'flex',
-          justifyContent: 'flex-end',
+          justifyContent: 'space-between',
           gap: '12px'
         }}>
-          <button
-            onClick={resetConfig}
-            className="btn btn-secondary"
-            disabled={saving}
-          >
-            <RotateCcw size={16} style={{ marginRight: '8px' }} />
-            Reset
-          </button>
-          <button
-            onClick={saveConfig}
-            className="btn btn-primary"
-            disabled={saving}
-          >
-            <Save size={16} style={{ marginRight: '8px' }} />
-            {saving ? 'Saving...' : 'Save Configuration'}
-          </button>
+          <div>
+            <button
+              onClick={deleteServer}
+              style={{
+                background: '#e74c3c',
+                color: 'white',
+                border: 'none',
+                padding: '8px 16px',
+                borderRadius: '4px',
+                cursor: 'pointer'
+              }}
+            >
+              Delete Server
+            </button>
+          </div>
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <button
+              onClick={resetConfig}
+              className="btn btn-secondary"
+              disabled={saving}
+            >
+              <RotateCcw size={16} style={{ marginRight: '8px' }} />
+              Reset
+            </button>
+            <button
+              onClick={saveConfig}
+              className="btn btn-primary"
+              disabled={saving}
+            >
+              <Save size={16} style={{ marginRight: '8px' }} />
+              {saving ? 'Saving...' : 'Save Configuration'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

